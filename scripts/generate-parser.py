@@ -143,6 +143,8 @@ def check():
         raise RuntimeError("The generator has changed; rebuild the snapshot")
     if manifest["licenseHashes"] != hashes(ROOT / "Licenses"):
         raise RuntimeError("License sources have changed")
+    if (ROOT / ".git").exists() and gitlinks() != {name: entry["revision"] for name, entry in manifest["upstream"].items()}:
+        raise RuntimeError("Gitlinks do not match the generated snapshot revisions")
     actual = hashes(DEST)
     if actual != manifest["files"]:
         raise RuntimeError("Generated output does not match the manifest")

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "generatorSHA256": "8b36941b46883c7781fe8bfd7fa409d0221918ff1af7db31b780d132c15ec8a2",
+  "generatorSHA256": "d3b868c31ae61fd9ed765f1526283ec7c7ca48f0183df9fe0031dd05291d4272",
   "upstream": {
     "swift-markdown": {
       "url": "https://github.com/ai-markdown/swift-markdown.git",

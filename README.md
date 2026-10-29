@@ -45,6 +45,8 @@ Before release, ensure the referenced fork commits are available remotely, then 
 
 ## Validation
 
-Run `swift test` and `swift test -c release` for the upstream and package-boundary suites. `Tests/UpstreamMarkdownTests.manifest.json` records the upstream test revision and original/generated file hashes.
+Run `swift test` and `swift test -c release` for the upstream and package-boundary suites. CI checks snapshot integrity, rebuilds from pinned forks, and runs both test configurations. `Tests/UpstreamMarkdownTests.manifest.json` records the upstream test revision and original/generated file hashes.
+
+Maintainers can run `python3 scripts/verify-consumer.py` to recreate a standalone Git consumer with local bare mirrors and verify Debug/Release coexistence with official Markdown without initializing maintenance submodules. The comparison versions are pinned in `scripts/consumer-probe/baselines.json`. This probe needs both fork object databases; ordinary package installation does not. Use `--output` to choose a new result directory.
 
 Keep full command logs, one-time migration archives, and validation run results outside the source tree, such as local build output or CI artifacts. The package retains reproducible checks, test sources, license records, and source manifests rather than historical run artifacts.
