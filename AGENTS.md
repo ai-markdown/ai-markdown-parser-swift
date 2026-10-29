@@ -13,3 +13,10 @@ See [README.md](README.md) for this repository's purpose, package structure, and
 - Preserve module, C symbol, and header isolation, and validate coexistence with the official parser after migration or upgrades.
 - Maintenance tools may use submodules; ordinary SwiftPM consumption must not require submodule initialization, generators, or the workspace.
 - Run checks appropriate to each change. Keep full logs and one-time migration archives outside the source tree; retain reproducible checks, tests, source manifests, and licenses in this repository. Do not present historical results as new validation.
+
+## Commit messages
+
+- Follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) using `<type>[optional scope][!]: <description>`.
+- Use `feat` for new functionality, `fix` for bug fixes, and other types such as `docs`, `test`, or `refactor` as appropriate.
+- Describe what the commit changes. Add a body when needed to explain the behavior or reasoning, separated from the subject by a blank line.
+- Mark breaking changes with `!` after the type or scope, or with a `BREAKING CHANGE: <description>` footer.

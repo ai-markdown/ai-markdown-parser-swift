@@ -4,11 +4,11 @@
   "upstream": {
     "swift-markdown": {
       "url": "https://github.com/ai-markdown/swift-markdown.git",
-      "revision": "740236d9d92f158a16828a83d6a93c46844cd5f8"
+      "revision": "acc175106147aa0f0e491bc7b16176b1bdd08d13"
     },
     "swift-cmark": {
       "url": "https://github.com/ai-markdown/swift-cmark.git",
-      "revision": "550f46509d431aa20991cca5c0b8578987426994"
+      "revision": "62086b07f49a9bc9f469fb3602f8411de7217814"
     }
   },
   "licenseHashes": {
