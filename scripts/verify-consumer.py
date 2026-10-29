@@ -51,7 +51,7 @@ shutil.copyfile(ROOT/'scripts/consumer-probe/main.swift',consumer/'Sources/Consu
 # Package.swift must exist first so SwiftPM does not write local configuration into an ancestor maintenance repository.
 for command in mirror_commands:run(command,consumer)
 results=[]
-manifest=json.loads((ROOT/'Vendor/Parser/manifest.json').read_text())
+manifest=json.loads((ROOT/'scripts/parser-manifest.json').read_text())
 for mode in ['debug','release']:
     text=run(['swift','run','-c',mode,'Consumer'],consumer)
     assert 'Official Markdown and AIMarkdownParser coexistence passed with real Git dependencies' in text

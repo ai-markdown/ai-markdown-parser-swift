@@ -13,7 +13,8 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-DEST = ROOT / "Vendor/Parser"
+DEST = ROOT / "Sources"
+MANIFEST = ROOT / "scripts/parser-manifest.json"
 MODULES = {"cmark_gfm": "AIMarkdownCMark", "cmark_gfm_extensions": "AIMarkdownCMarkExtensions",
            "CAtomic": "AIMarkdownCAtomic"}
 # Skip comments and string/character literals, preserving include names and runtime strings.
@@ -30,7 +31,7 @@ def sha(path):
 
 def hashes(directory):
     return {str(p.relative_to(directory)): sha(p) for p in sorted(directory.rglob("*"))
-            if p.is_file() and p.name != "manifest.json"}
+            if p.is_file()}
 
 
 def gitlinks():
@@ -61,10 +62,10 @@ def symbols(directory):
         for index, source in enumerate(sorted(directory.rglob("*.c"))):
             obj = Path(temp) / f"{index}.o"
             subprocess.run(["clang", "-std=c99", "-c", str(source), "-o", str(obj),
-                            "-I", str(directory / "CMark/include"),
-                            "-I", str(directory / "CMarkExtensions/include"),
-                            "-I", str(directory / "CMarkExtensions"),
-                            "-I", str(directory / "CAtomic/include")], check=True, capture_output=True)
+                            "-I", str(directory / "AIMarkdownCMark/include"),
+                            "-I", str(directory / "AIMarkdownCMarkExtensions/include"),
+                            "-I", str(directory / "AIMarkdownCMarkExtensions"),
+                            "-I", str(directory / "AIMarkdownCAtomic/include")], check=True, capture_output=True)
             for line in run(["nm", "-g", str(obj)]).splitlines():
                 match = re.search(r"\b[BCDGIRSTVW]\s+(\S+)$", line)
                 if match:
@@ -74,14 +75,14 @@ def symbols(directory):
 
 
 def generate(args, output):
-    with tempfile.TemporaryDirectory(prefix="aimarkdown-vendor-") as temp:
+    with tempfile.TemporaryDirectory(prefix="aimarkdown-sources-") as temp:
         temp = Path(temp)
         for name, checkout in [("swift-markdown", args.markdown_checkout), ("swift-cmark", args.cmark_checkout)]:
             export(checkout, name, temp / name)
-        selections = [("swift-markdown", "Sources/Markdown", "Markdown", {".swift"}),
-                      ("swift-markdown", "Sources/CAtomic", "CAtomic", {".c", ".h", ".modulemap"}),
-                      ("swift-cmark", "src", "CMark", {".c", ".h", ".inc", ".modulemap"}),
-                      ("swift-cmark", "extensions", "CMarkExtensions", {".c", ".h", ".inc", ".modulemap"})]
+        selections = [("swift-markdown", "Sources/Markdown", "AIMarkdownParser", {".swift"}),
+                      ("swift-markdown", "Sources/CAtomic", "AIMarkdownCAtomic", {".c", ".h", ".modulemap"}),
+                      ("swift-cmark", "src", "AIMarkdownCMark", {".c", ".h", ".inc", ".modulemap"}),
+                      ("swift-cmark", "extensions", "AIMarkdownCMarkExtensions", {".c", ".h", ".inc", ".modulemap"})]
         for name, source_dir, dest_dir, suffixes in selections:
             source = temp / name / source_dir
             for path in sorted(source.rglob("*")):
@@ -91,10 +92,9 @@ def generate(args, output):
                     shutil.copyfile(path, dest)
         for name, files in {"swift-markdown": ["LICENSE.txt", "NOTICE.txt"], "swift-cmark": ["COPYING"]}.items():
             for filename in files:
-                dest = output / "Licenses" / name / filename
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(temp / name / filename, dest)
-        shutil.copytree(ROOT / "Licenses", output / "Licenses", dirs_exist_ok=True)
+                license_path = ROOT / "Licenses" / name / filename
+                if license_path.read_bytes() != (temp / name / filename).read_bytes():
+                    raise RuntimeError("Update the bundled upstream license: " + str(license_path))
         original_symbols = symbols(output)
         identifiers = set()
         for path in output.rglob("*"):
@@ -112,7 +112,7 @@ def generate(args, output):
             # Explicit module scanning selects dependencies by header name; isolate filenames to prevent the official module from selecting this copy.
             content = re.sub(r'(?m)(#\s*include\s*[<"]|\bheader\s+")([^>"\n]+)([>"])',
                              lambda match: match[1] + headers.get(match[2], match[2]) + match[3], content)
-            content = "// AI Markdown custom parser with isolated modules and C symbols; provenance and rebuild rules: Vendor/Parser/manifest.json.\n" + content
+            content = "// AI Markdown custom parser with isolated modules and C symbols; provenance and rebuild rules: scripts/parser-manifest.json.\n" + content
             path.write_text(content)
         for path in list(output.rglob("*.h")):
             path.rename(path.with_name(headers[path.name]))
@@ -121,7 +121,8 @@ def generate(args, output):
         if renamed != expected:
             raise RuntimeError("C symbol prefix audit failed")
         manifest = {
-            "schemaVersion": 3,
+            "schemaVersion": 4,
+            "sourceRoot": "Sources",
             "generatorSHA256": sha(Path(__file__)),
             "upstream": {name: {"url": f"https://github.com/ai-markdown/{name}.git", "revision": revision}
                          for name, revision in gitlinks().items()},
@@ -134,11 +135,11 @@ def generate(args, output):
             "cGlobalSymbols": {name: mapping[name] for name in original_symbols},
             "files": hashes(output),
         }
-        (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        return manifest
 
 
 def check():
-    manifest = json.loads((DEST / "manifest.json").read_text())
+    manifest = json.loads(MANIFEST.read_text())
     if manifest["generatorSHA256"] != sha(Path(__file__)):
         raise RuntimeError("The generator has changed; rebuild the snapshot")
     if manifest["licenseHashes"] != hashes(ROOT / "Licenses"):
@@ -154,26 +155,28 @@ def check():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check source and license hashes without upstream checkouts or a compiler")
-    parser.add_argument("--rebuild-check", action="store_true", help="Rebuild from pinned Git objects and compare bytes without modifying Vendor")
+    parser.add_argument("--rebuild-check", action="store_true", help="Rebuild from pinned Git objects and compare bytes without modifying Sources")
     parser.add_argument("--markdown-checkout", type=Path, default=ROOT / "upstream/swift-markdown")
     parser.add_argument("--cmark-checkout", type=Path, default=ROOT / "upstream/swift-cmark")
     args = parser.parse_args()
     if args.check:
         check()
     if args.rebuild_check or not args.check:
-        with tempfile.TemporaryDirectory(prefix="aimarkdown-vendor-output-") as temp:
-            output = Path(temp) / "Parser"
+        with tempfile.TemporaryDirectory(prefix="aimarkdown-sources-output-") as temp:
+            output = Path(temp) / "Sources"
             output.mkdir()
-            generate(args, output)
+            manifest = generate(args, output)
+            manifest_bytes = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
             if args.rebuild_check:
-                if hashes(output) != hashes(DEST) or (output / "manifest.json").read_bytes() != (DEST / "manifest.json").read_bytes():
-                    raise RuntimeError("The rebuild from pinned Git objects differs from Vendor")
-                print("The rebuild from pinned Git objects is byte-identical to Vendor")
+                if hashes(output) != hashes(DEST) or manifest_bytes != MANIFEST.read_bytes():
+                    raise RuntimeError("The rebuild from pinned Git objects differs from Sources")
+                print("The rebuild from pinned Git objects is byte-identical to Sources")
             else:
                 if DEST.exists():
                     shutil.rmtree(DEST)
                 DEST.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(output, DEST)
+                MANIFEST.write_bytes(manifest_bytes)
                 check()
 
 

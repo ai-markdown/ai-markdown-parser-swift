@@ -8,12 +8,25 @@ A custom Markdown parser for Swift, used by the Engine in [ai-markdown-swift](ht
 
 - `upstream/swift-markdown`: the organization fork containing the Swift AST, CAtomic, and the custom Swift implementation.
 - `upstream/swift-cmark`: the organization fork containing the C core, extensions, and the custom C implementation.
-- `Vendor/Parser`: checked-in isolated sources generated from the two pinned gitlink commits. Ordinary SwiftPM builds use these files directly without initializing submodules, accessing the workspace, running Python, or replaying patches.
+- `Sources/<TargetName>/`: checked-in isolated sources generated from the two pinned gitlink commits. Ordinary SwiftPM builds use these files directly without initializing submodules, accessing the workspace, running Python, or replaying patches.
+- `scripts/parser-manifest.json`: source revisions, generated file hashes, header mappings, and C symbol isolation records.
 - `Licenses`: all third-party licenses for the implementation; original upstream licenses and source copyright notices are preserved.
 - `Tests/UpstreamMarkdownTests`: pinned upstream tests with only module imports and two qualified type names changed; assertions and resources are unchanged.
 - `Tests/ParserBoundaryTests`: checks for cross-package public fields, custom syntax, metadata, and C node lifetimes.
 
-The initial migration retains the swift-markdown / swift-cmark 0.9.0 baselines without upgrading upstream. The semantic patches were committed to the two forks in the original generation order. `scripts/generate-parser.py` exports fixed commits and applies name isolation; it **does not apply the patches again**. Implementation provenance is maintained in each fork under `AIMarkdown/provenance.json`; this package records its exact source revisions and license hashes in `Vendor/Parser/manifest.json`.
+The initial migration retains the swift-markdown / swift-cmark 0.9.0 baselines without upgrading upstream. The semantic patches were committed to the two forks in the original generation order. `scripts/generate-parser.py` exports fixed commits and applies name isolation; it **does not apply the patches again**. Implementation provenance is maintained in each fork under `AIMarkdown/provenance.json`; this package records its exact source revisions and license hashes in `scripts/parser-manifest.json`.
+
+The generated source targets follow the standard SwiftPM layout:
+
+```text
+Sources/
+├── AIMarkdownParser/
+├── AIMarkdownCMark/
+├── AIMarkdownCMarkExtensions/
+└── AIMarkdownCAtomic/
+```
+
+All four directories are generated and committed. Update the forks and regenerate these sources rather than editing them manually. Third-party licenses remain in the root `Licenses/` directory.
 
 ## Development and validation
 
