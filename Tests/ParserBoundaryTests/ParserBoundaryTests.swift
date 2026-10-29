@@ -32,6 +32,44 @@ final class ParserBoundaryTests: XCTestCase {
         }
     }
 
+    func testListSpreadIsOptInParserEvidence() throws {
+        // Expected values are the Web mdast `spread` fields for these inputs.
+        let cases: [(String, [Bool])] = [
+            ("- a\n- b", [false, false, false]),
+            ("- a\n\n- b", [true, false, false]),
+            ("- a\n\n  b", [false, true]),
+            ("> - a\n>\n>", [true, false]),
+            ("> - a\n>\n", [false, false]),
+            ("1. a\r\n\r\n   b\r\n2. c", [false, true, false]),
+        ]
+        for (input, expected) in cases {
+            let original = Document(parsing: input)
+            let captured = Document(parsing: input, options: [.parseListSpreadMetadata])
+            let spread: [Bool?] = descendants(captured).compactMap { node in
+                switch node {
+                case let list as UnorderedList: return .some(list.parsedSpread)
+                case let list as OrderedList: return .some(list.parsedSpread)
+                case let item as ListItem: return .some(item.parsedSpread)
+                default: return nil
+                }
+            }
+            XCTAssertEqual(spread, expected.map { $0 }, input)
+            XCTAssertTrue(descendants(original).allSatisfy { node in
+                (node as? ListItem)?.parsedSpread == nil && (node as? UnorderedList)?.parsedSpread == nil &&
+                    (node as? OrderedList)?.parsedSpread == nil
+            })
+            XCTAssertEqual(original.format(), captured.format())
+        }
+        let unsupported = Document(parsing: "- a\n\n- b\n\nterm\n: body", options: [.parseListSpreadMetadata, .parseDefinitionLists])
+        XCTAssertTrue(descendants(unsupported).compactMap { $0 as? UnorderedList }.allSatisfy { $0.parsedSpread == nil })
+        XCTAssertNil(ListItem(Paragraph(Text("x"))).parsedSpread)
+        XCTAssertNil(UnorderedList(ListItem(Paragraph(Text("x")))).parsedSpread)
+        var item = try XCTUnwrap(descendants(Document(parsing: "- a\n\n  b", options: [.parseListSpreadMetadata])).compactMap { $0 as? ListItem }.first)
+        XCTAssertEqual(item.parsedSpread, true)
+        item.checkbox = .checked
+        XCTAssertNil(item.parsedSpread)
+    }
+
     func testCodeMetadataAndLongDelimiterRemainOptIn() throws {
         let delimiter = String(repeating: "`", count: 100)
         let input = "prefix " + delimiter + " a\r\nb " + delimiter

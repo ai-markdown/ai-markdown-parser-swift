@@ -32,9 +32,9 @@ enum RawMarkupData: Equatable {
     case heading(level: Int)
     case thematicBreak
     case htmlBlock(String)
-    case listItem(checkbox: Checkbox?)
-    case orderedList(startIndex: UInt = 1)
-    case unorderedList
+    case listItem(checkbox: Checkbox?, spread: Bool? = nil)
+    case orderedList(startIndex: UInt = 1, spread: Bool? = nil)
+    case unorderedList(spread: Bool? = nil)
     case paragraph
     case blockDirective(name: String, nameLocation: SourceLocation?, arguments: DirectiveArgumentText)
 
@@ -277,16 +277,16 @@ final class RawMarkup: ManagedBuffer<RawMarkupHeader, RawMarkup> {
         return .create(data: .htmlBlock(html), parsedRange: parsedRange, children: [])
     }
 
-    static func listItem(checkbox: Checkbox?, parsedRange: SourceRange?, _ children: [RawMarkup]) -> RawMarkup {
-        return .create(data: .listItem(checkbox: checkbox), parsedRange: parsedRange, children: children)
+    static func listItem(checkbox: Checkbox?, parsedRange: SourceRange?, _ children: [RawMarkup], spread: Bool? = nil) -> RawMarkup {
+        return .create(data: .listItem(checkbox: checkbox, spread: spread), parsedRange: parsedRange, children: children)
     }
 
-    static func orderedList(parsedRange: SourceRange?, _ children: [RawMarkup], startIndex: UInt = 1) -> RawMarkup {
-        return .create(data: .orderedList(startIndex: startIndex), parsedRange: parsedRange, children: children)
+    static func orderedList(parsedRange: SourceRange?, _ children: [RawMarkup], startIndex: UInt = 1, spread: Bool? = nil) -> RawMarkup {
+        return .create(data: .orderedList(startIndex: startIndex, spread: spread), parsedRange: parsedRange, children: children)
     }
 
-    static func unorderedList(parsedRange: SourceRange?, _ children: [RawMarkup]) -> RawMarkup {
-        return .create(data: .unorderedList, parsedRange: parsedRange, children: children)
+    static func unorderedList(parsedRange: SourceRange?, _ children: [RawMarkup], spread: Bool? = nil) -> RawMarkup {
+        return .create(data: .unorderedList(spread: spread), parsedRange: parsedRange, children: children)
     }
 
     static func paragraph(parsedRange: SourceRange?, _ children: [RawMarkup]) -> RawMarkup {

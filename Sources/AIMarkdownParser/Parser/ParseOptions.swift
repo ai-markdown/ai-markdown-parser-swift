@@ -47,6 +47,9 @@ public struct ParseOptions: OptionSet, Sendable {
     /// Capture physical EOLs on actual SoftBreak events without changing existing display or serialization behavior.
     public static let parseSoftBreakMetadata = ParseOptions(rawValue: 1 << 17)
 
+    /// Derive Web mdast list and list-item `spread` from block-parser events without changing display or `tight`.
+    public static let parseListSpreadMetadata = ParseOptions(rawValue: 1 << 18)
+
     /// Accept Web code delimiter lengths without the legacy 80/255 limits.
     public static let parseWebCodeSyntax = ParseOptions(rawValue: 1 << 16)
 

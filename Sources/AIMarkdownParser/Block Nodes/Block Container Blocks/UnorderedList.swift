@@ -34,6 +34,15 @@ public extension UnorderedList {
         try! self.init(.unorderedList(parsedRange: nil, items.map { $0.raw.markup }))
     }
 
+    /// Web mdast `spread` derived from block-parser events when `parseListSpreadMetadata` is enabled.
+    ///
+    /// Nil when capture is disabled or unsupported, or when the node is constructed or rebuilt programmatically;
+    /// it is parse evidence and is not recomputed after child edits.
+    var parsedSpread: Bool? {
+        guard case let .unorderedList(spread) = _data.raw.markup.data else { return nil }
+        return spread
+    }
+
     // MARK: Visitation
 
     func accept<V: MarkupVisitor>(_ visitor: inout V) -> V.Result {

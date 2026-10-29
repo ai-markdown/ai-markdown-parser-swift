@@ -174,6 +174,10 @@ int aimarkdown_cmark_node_get_softbreak_ending(aimarkdown_cmark_node *node) {
   return node && node->type == AIMARKDOWN_CMARK_NODE_SOFTBREAK ? node->softbreak_ending : 0;
 }
 
+int aimarkdown_cmark_node_get_list_spread(aimarkdown_cmark_node *node) {
+  return node && (node->type == AIMARKDOWN_CMARK_NODE_LIST || node->type == AIMARKDOWN_CMARK_NODE_ITEM) ? node->list_spread : 0;
+}
+
 aimarkdown_cmark_node *aimarkdown_cmark_node_new(aimarkdown_cmark_node_type type) {
   return aimarkdown_cmark_node_new_with_ext(type, NULL);
 }
@@ -189,6 +193,7 @@ static void clear_reference_usage(aimarkdown_cmark_node *node) {
 
 static void free_node_as(aimarkdown_cmark_node *node) {
   node->softbreak_ending = 0;
+  node->list_spread = 0;
   clear_reference_usage(node);
   if (node->reference_definition) {
     aimarkdown_cmark_reference_definition *def = node->reference_definition;

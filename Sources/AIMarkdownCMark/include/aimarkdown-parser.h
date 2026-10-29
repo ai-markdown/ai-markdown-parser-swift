@@ -72,6 +72,8 @@ struct aimarkdown_cmark_parser {
   /* used when parsing inlines, can be populated by extensions if any are loaded */
   int8_t *skip_chars;
   int8_t *special_chars;
+  /* Opt-in container/line ledger used only to derive list and item spread. */
+  struct aimarkdown_cmark_list_spread_ledger *list_spread;
 };
 
 #ifdef __cplusplus

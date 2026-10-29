@@ -94,6 +94,8 @@ typedef struct {
 
 struct aimarkdown_cmark_node {
   int softbreak_ending; /* 0 absent, 10 LF, 13 CR, 0x0d0a CRLF; parser event evidence. */
+  int list_spread; /* 0 not captured, 1 not spread, 2 spread; list/item parser ledger evidence. */
+  int list_spread_id; /* Parser-local ledger identity; 0 when the node was never recorded. */
   aimarkdown_cmark_code_metadata *code_metadata;
   struct aimarkdown_cmark_syntax_extension *task_extension;
   int task_content_line;
@@ -229,6 +231,20 @@ void aimarkdown_cmark_code_metadata_finish(aimarkdown_cmark_node *node);
 void aimarkdown_cmark_code_metadata_clear(aimarkdown_cmark_node *node);
 void aimarkdown_cmark_code_metadata_inline(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk source);
 void aimarkdown_cmark_code_metadata_table(aimarkdown_cmark_node *node);
+
+/* List spread ledger hooks; each is a no-op unless CMARK_OPT_LIST_SPREAD_METADATA is set. */
+struct aimarkdown_cmark_parser;
+void aimarkdown_cmark_list_spread_line(struct aimarkdown_cmark_parser *parser);
+void aimarkdown_cmark_list_spread_prefix(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
+void aimarkdown_cmark_list_spread_open(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
+void aimarkdown_cmark_list_spread_close(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
+void aimarkdown_cmark_list_spread_leaf(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *leaf, bool closed);
+void aimarkdown_cmark_list_spread_prefix_only(struct aimarkdown_cmark_parser *parser, bool prefix_only);
+void aimarkdown_cmark_list_spread_end_line(struct aimarkdown_cmark_parser *parser, bool has_line_ending);
+void aimarkdown_cmark_list_spread_eof(struct aimarkdown_cmark_parser *parser);
+void aimarkdown_cmark_list_spread_unsupported(struct aimarkdown_cmark_parser *parser);
+void aimarkdown_cmark_list_spread_finish(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *root);
+void aimarkdown_cmark_list_spread_free(struct aimarkdown_cmark_parser *parser);
 
 #ifdef __cplusplus
 }

@@ -53,7 +53,7 @@ public extension ListItem {
     /// An optional ``Checkbox`` for the list item, which can indicate completion of a task, or some other off/on information.
     var checkbox: Checkbox? {
         get {
-            guard case let .listItem(checkbox) = _data.raw.markup.data else {
+            guard case let .listItem(checkbox, _) = _data.raw.markup.data else {
                 fatalError("\(self) markup wrapped unexpected \(_data.raw)")
             }
             return checkbox
@@ -61,6 +61,15 @@ public extension ListItem {
         set {
             _data = _data.replacingSelf(.listItem(checkbox: newValue, parsedRange: nil, _data.raw.markup.copyChildren()))
         }
+    }
+
+    /// Web mdast `spread` derived from block-parser events when `parseListSpreadMetadata` is enabled.
+    ///
+    /// Nil when capture is disabled or unsupported, or when the node is constructed or rebuilt programmatically;
+    /// it is parse evidence and is not recomputed after child edits.
+    var parsedSpread: Bool? {
+        guard case let .listItem(_, spread) = _data.raw.markup.data else { return nil }
+        return spread
     }
 
     // MARK: Visitation

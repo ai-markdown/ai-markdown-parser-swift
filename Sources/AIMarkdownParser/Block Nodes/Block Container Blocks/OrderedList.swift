@@ -40,7 +40,7 @@ public extension OrderedList {
     /// HTML, clients may omit the `start` attribute of the rendered list when this returns 1.
     var startIndex: UInt {
         get {
-            guard case let .orderedList(start) = _data.raw.markup.data else {
+            guard case let .orderedList(start, _) = _data.raw.markup.data else {
                 fatalError("\(self) markup wrapped unexpected \(_data.raw)")
             }
             return start
@@ -51,6 +51,15 @@ public extension OrderedList {
             }
             _data = _data.replacingSelf(.orderedList(parsedRange: nil, _data.raw.markup.copyChildren(), startIndex: newValue))
         }
+    }
+
+    /// Web mdast `spread` derived from block-parser events when `parseListSpreadMetadata` is enabled.
+    ///
+    /// Nil when capture is disabled or unsupported, or when the node is constructed or rebuilt programmatically;
+    /// it is parse evidence and is not recomputed after child edits.
+    var parsedSpread: Bool? {
+        guard case let .orderedList(_, spread) = _data.raw.markup.data else { return nil }
+        return spread
     }
 
     // MARK: Visitation

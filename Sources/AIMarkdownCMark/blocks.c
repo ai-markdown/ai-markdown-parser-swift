@@ -124,6 +124,7 @@ int aimarkdown_cmark_parser_attach_syntax_extension(aimarkdown_cmark_parser *par
 }
 
 static void aimarkdown_cmark_parser_dispose(aimarkdown_cmark_parser *parser) {
+  aimarkdown_cmark_list_spread_free(parser);
   if (parser->root)
     aimarkdown_cmark_node_free(parser->root);
 
@@ -465,6 +466,7 @@ static aimarkdown_cmark_node *finalize(aimarkdown_cmark_parser *parser, aimarkdo
   assert(b->flags &
          AIMARKDOWN_CMARK_NODE__OPEN); // shouldn't call finalize on closed blocks
   b->flags &= ~AIMARKDOWN_CMARK_NODE__OPEN;
+  aimarkdown_cmark_list_spread_close(parser, b);
 
   if (S_type(b) == AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION &&
       (parser->options & AIMARKDOWN_CMARK_OPT_FOOTNOTES_LOSSLESS)) {
@@ -1270,6 +1272,7 @@ static bool parse_code_block_prefix(aimarkdown_cmark_parser *parser, aimarkdown_
       *should_continue = false;
       S_advance_offset(parser, input, matched, false);
       if (container->code_metadata) container->code_metadata->closed = true;
+      aimarkdown_cmark_list_spread_leaf(parser, container, true);
       parser->current = finalize(parser, container);
     } else {
       // skip opt. spaces of fence parser->offset
@@ -1304,6 +1307,7 @@ static bool parse_math_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
   if (matched >= container->math_fence_length && matched > 0) {
     container->math_closing_fence = true; // finalize this line, not the previous line
     *should_continue = false;
+    aimarkdown_cmark_list_spread_leaf(parser, container, true);
     S_advance_offset(parser, input, parser->first_nonspace + matched - parser->offset, false);
     parser->current = finalize(parser, container);
     return false;
@@ -1393,8 +1397,10 @@ static aimarkdown_cmark_node *check_open_blocks(aimarkdown_cmark_parser *parser,
     case AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE:
       if (!parse_block_quote_prefix(parser, input))
         goto done;
+      aimarkdown_cmark_list_spread_prefix(parser, container);
       break;
     case AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION:
+      aimarkdown_cmark_list_spread_unsupported(parser);
       if (parser->blank) {
         container->definition.blank_lines++;
         S_advance_offset(parser, input, MIN(parser->indent, container->definition.padding), true);
@@ -1438,7 +1444,14 @@ static aimarkdown_cmark_node *check_open_blocks(aimarkdown_cmark_parser *parser,
       }
       break;
 		case AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION:
+      /* Web emits a footnote indent token only on non-blank continuation lines. */
+      if (!parser->blank && parser->indent >= 4)
+        aimarkdown_cmark_list_spread_prefix(parser, container);
       if (!parse_footnote_definition_block_prefix(parser, input, container)) {
+        /* Web continues footnote definitions across every blank line; this
+         * parser closes them on whitespace-only or CR blank lines. */
+        if (parser->blank)
+          aimarkdown_cmark_list_spread_unsupported(parser);
         if (parser->options & AIMARKDOWN_CMARK_OPT_CODE_METADATA) {
           for (aimarkdown_cmark_node *open = parser->current; open && open != container; open = open->parent)
             if (open->code_metadata && open->code_metadata->kind == 1) open->code_metadata->boundary_trim = true;
@@ -1498,6 +1511,7 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       }
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE,
                              blockquote_startpos + 1);
+      aimarkdown_cmark_list_spread_open(parser, *container);
 
     } else if (!indented && (matched = scan_atx_heading_start(
                                  input, parser->first_nonspace))) {
@@ -1521,6 +1535,7 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       (*container)->as.heading.level = level;
       (*container)->as.heading.setext = false;
       (*container)->internal_offset = matched;
+      aimarkdown_cmark_list_spread_leaf(parser, *container, false);
 
     } else if (!indented && (parser->options & AIMARKDOWN_CMARK_OPT_MATH) &&
                (matched = math_fence(input, parser->first_nonspace, false))) {
@@ -1573,6 +1588,7 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
         (*container)->type = (uint16_t)AIMARKDOWN_CMARK_NODE_HEADING;
         (*container)->as.heading.level = lev;
         (*container)->as.heading.setext = true;
+        aimarkdown_cmark_list_spread_leaf(parser, *container, false);
         S_advance_offset(parser, input, input->len - 1 - parser->offset, false);
       }
     } else if (!indented &&
@@ -1582,6 +1598,7 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       // it's only now that we know the line is not part of a setext heading:
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_THEMATIC_BREAK,
                              parser->first_nonspace + 1);
+      aimarkdown_cmark_list_spread_leaf(parser, *container, false);
       S_advance_offset(parser, input, input->len - 1 - parser->offset, false);
     } else if (!indented &&
                (parser->options & AIMARKDOWN_CMARK_OPT_FOOTNOTES) &&
@@ -1602,6 +1619,7 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       (*container)->as.literal = c;
 
       (*container)->internal_offset = matched;
+      aimarkdown_cmark_list_spread_open(parser, *container);
     } else if ((!indented || cont_type == AIMARKDOWN_CMARK_NODE_LIST) &&
 	       parser->indent < 4 &&
                depth < MAX_LIST_DEPTH &&
@@ -1655,11 +1673,13 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
                                parser->first_nonspace + 1);
 
         memcpy(&((*container)->as.list), data, sizeof(*data));
+        aimarkdown_cmark_list_spread_open(parser, *container);
       }
 
       // add the list item
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_ITEM,
                              parser->first_nonspace + 1);
+      aimarkdown_cmark_list_spread_open(parser, *container);
       /* TODO: static */
       memcpy(&((*container)->as.list), data, sizeof(*data));
       parser->mem->free(data);
@@ -1687,6 +1707,16 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
 
           if (new_container) {
             *container = new_container;
+            if (parser->options & AIMARKDOWN_CMARK_OPT_LIST_SPREAD_METADATA) {
+              const char *kind = aimarkdown_cmark_node_get_type_string(new_container);
+              if (strcmp(kind, "table") == 0)
+                aimarkdown_cmark_list_spread_leaf(parser, new_container, false);
+              else if ((strcmp(kind, "table_row") == 0 || strcmp(kind, "table_header") == 0) &&
+                       new_container->parent)
+                aimarkdown_cmark_list_spread_leaf(parser, new_container->parent, false);
+              else if (S_type(new_container) != AIMARKDOWN_CMARK_NODE_PARAGRAPH)
+                aimarkdown_cmark_list_spread_unsupported(parser);
+            }
             break;
           }
         }
@@ -1755,6 +1785,7 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
       parser->current->definition.lazy_line = parser->line_number;
       parser->current->definition.lazy_column = parser->offset + 1;
     }
+    aimarkdown_cmark_list_spread_leaf(parser, parser->current, false);
     add_line(parser->current, input, parser);
   } else { // not a lazy continuation
     // Finalize any blocks that were not matched and set cur to container:
@@ -1764,6 +1795,7 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
     }
 
     if (S_type(container) == AIMARKDOWN_CMARK_NODE_CODE_BLOCK || S_type(container) == AIMARKDOWN_CMARK_NODE_MATH_BLOCK) {
+      aimarkdown_cmark_list_spread_leaf(parser, container, false);
       add_line(container, input, parser);
     } else if (S_type(container) == AIMARKDOWN_CMARK_NODE_HTML_BLOCK) {
       add_line(container, input, parser);
@@ -1800,6 +1832,7 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
         break;
       }
 
+      aimarkdown_cmark_list_spread_leaf(parser, container, matches_end_condition != 0);
       if (matches_end_condition) {
         container = finalize(parser, container);
         assert(parser->current != NULL);
@@ -1816,6 +1849,7 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
         parser->math_inline_prefix = parser->first_nonspace - parser->offset;
         S_advance_offset(parser, input, parser->first_nonspace - parser->offset, false);
       }
+      aimarkdown_cmark_list_spread_leaf(parser, container, false);
       add_line(container, input, parser);
     } else {
       // create paragraph container for line
@@ -1829,6 +1863,7 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
         S_advance_offset(parser, input, parser->first_nonspace - parser->offset,
                            false);
       }
+      aimarkdown_cmark_list_spread_leaf(parser, container, false);
       add_line(container, input, parser);
     }
 
@@ -1845,6 +1880,9 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
   if (parser->indent >= 4 || peek_at(input, parser->first_nonspace) != ':' ||
       !(S_is_space_or_tab(peek_at(input, parser->first_nonspace + 1)) ||
         S_is_line_end_char(peek_at(input, parser->first_nonspace + 1)))) return false;
+  /* Definition-list markers can restructure surrounding flow in Web parsing;
+   * list spread is not derived for documents containing a marker candidate. */
+  aimarkdown_cmark_list_spread_unsupported(parser);
   aimarkdown_cmark_node *container = *matched;
   aimarkdown_cmark_node *list = NULL;
   aimarkdown_cmark_node *term = NULL;
@@ -2059,6 +2097,7 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
     parser->offset += 3;
 
   parser->line_number++;
+  aimarkdown_cmark_list_spread_line(parser);
 
   last_matched_container = check_open_blocks(parser, &input, &all_matched);
 
@@ -2066,7 +2105,10 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
     goto finished;
 
   parser->definition_line_offset = parser->offset;
-  if (S_open_definition(parser, &input, &last_matched_container)) all_matched = true;
+  if (S_open_definition(parser, &input, &last_matched_container)) {
+    all_matched = true;
+    aimarkdown_cmark_list_spread_unsupported(parser);
+  }
   parser->definition_line_offset = parser->offset;
   container = last_matched_container;
 
@@ -2075,6 +2117,9 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
   // Only open new blocks if we're not limited to inline
   if ((parser->options & AIMARKDOWN_CMARK_OPT_INLINE_ONLY) == 0)
     open_new_blocks(parser, &container, &input, all_matched);
+
+  /* Web exits containers after this line's prefixes when input ends there. */
+  aimarkdown_cmark_list_spread_prefix_only(parser, input.len - parser->offset <= 1);
 
   /* parser->current might have changed if feed_reentrant was called */
   if (current == parser->current)
@@ -2085,6 +2130,7 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
     parser->current = finalize(parser, parser->current);
   }
 finished:
+  aimarkdown_cmark_list_spread_end_line(parser, parser->math_last_line_ending);
   parser->last_line_length = input.len;
   if (parser->last_line_length &&
       input.data[parser->last_line_length - 1] == '\n')
@@ -2122,6 +2168,7 @@ aimarkdown_cmark_node *aimarkdown_cmark_parser_finish(aimarkdown_cmark_parser *p
     aimarkdown_cmark_strbuf_clear(&parser->linebuf);
   }
 
+  aimarkdown_cmark_list_spread_eof(parser);
   finalize_document(parser);
 
   aimarkdown_cmark_consolidate_text_nodes(parser->root);
@@ -2143,6 +2190,8 @@ aimarkdown_cmark_node *aimarkdown_cmark_parser_finish(aimarkdown_cmark_parser *p
         parser->root = processed;
     }
   }
+
+  aimarkdown_cmark_list_spread_finish(parser, parser->root);
 
   res = parser->root;
   parser->root = NULL;
