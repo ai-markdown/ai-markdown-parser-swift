@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Generate an isolated parser from pinned fork gitlinks without reapplying semantic patches."""
+import argparse
+import hashlib
+import io
+import json
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+DEST = ROOT / "Vendor/Parser"
+MODULES = {"cmark_gfm": "AIMarkdownCMark", "cmark_gfm_extensions": "AIMarkdownCMarkExtensions",
+           "CAtomic": "AIMarkdownCAtomic"}
+# Skip comments and string/character literals, preserving include names and runtime strings.
+TOKENS = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\b[A-Za-z_][A-Za-z_0-9]*\b', re.S)
+
+
+def run(args, **kwargs):
+    return subprocess.check_output(args, text=True, **kwargs)
+
+
+def sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def hashes(directory):
+    return {str(p.relative_to(directory)): sha(p) for p in sorted(directory.rglob("*"))
+            if p.is_file() and p.name != "manifest.json"}
+
+
+def gitlinks():
+    result = {}
+    for name in ["swift-markdown", "swift-cmark"]:
+        record = run(["git", "-C", str(ROOT), "ls-files", "--stage", "--", "upstream/" + name]).strip().split()
+        if len(record) != 4 or record[0] != "160000" or record[2] != "0":
+            raise RuntimeError("Stage an explicit submodule revision first: " + name)
+        result[name] = record[1]
+    return result
+
+
+def export(checkout, name, target):
+    revision = gitlinks()[name]
+    archive = subprocess.check_output(["git", "-C", str(checkout), "archive", revision])
+    target.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        for member in tar.getmembers():
+            if member.issym() or member.islnk() or member.name.startswith("/") or ".." in Path(member.name).parts:
+                raise RuntimeError("Unsafe fork archive entry: " + member.name)
+        tar.extractall(target)
+
+
+def symbols(directory):
+    """Enumerate external definitions from object files, including internal globals without a cmark prefix."""
+    definitions = set()
+    with tempfile.TemporaryDirectory(prefix="aimarkdown-symbols-") as temp:
+        for index, source in enumerate(sorted(directory.rglob("*.c"))):
+            obj = Path(temp) / f"{index}.o"
+            subprocess.run(["clang", "-std=c99", "-c", str(source), "-o", str(obj),
+                            "-I", str(directory / "CMark/include"),
+                            "-I", str(directory / "CMarkExtensions/include"),
+                            "-I", str(directory / "CMarkExtensions"),
+                            "-I", str(directory / "CAtomic/include")], check=True, capture_output=True)
+            for line in run(["nm", "-g", str(obj)]).splitlines():
+                match = re.search(r"\b[BCDGIRSTVW]\s+(\S+)$", line)
+                if match:
+                    name = match[1]
+                    definitions.add(name[1:] if platform.system() == "Darwin" else name)
+    return sorted(definitions)
+
+
+def generate(args, output):
+    with tempfile.TemporaryDirectory(prefix="aimarkdown-vendor-") as temp:
+        temp = Path(temp)
+        for name, checkout in [("swift-markdown", args.markdown_checkout), ("swift-cmark", args.cmark_checkout)]:
+            export(checkout, name, temp / name)
+        selections = [("swift-markdown", "Sources/Markdown", "Markdown", {".swift"}),
+                      ("swift-markdown", "Sources/CAtomic", "CAtomic", {".c", ".h", ".modulemap"}),
+                      ("swift-cmark", "src", "CMark", {".c", ".h", ".inc", ".modulemap"}),
+                      ("swift-cmark", "extensions", "CMarkExtensions", {".c", ".h", ".inc", ".modulemap"})]
+        for name, source_dir, dest_dir, suffixes in selections:
+            source = temp / name / source_dir
+            for path in sorted(source.rglob("*")):
+                if path.is_file() and path.suffix in suffixes:
+                    dest = output / dest_dir / path.relative_to(source)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(path, dest)
+        for name, files in {"swift-markdown": ["LICENSE.txt", "NOTICE.txt"], "swift-cmark": ["COPYING"]}.items():
+            for filename in files:
+                dest = output / "Licenses" / name / filename
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(temp / name / filename, dest)
+        shutil.copytree(ROOT / "Licenses", output / "Licenses", dirs_exist_ok=True)
+        original_symbols = symbols(output)
+        identifiers = set()
+        for path in output.rglob("*"):
+            if path.is_file() and "Licenses" not in path.parts:
+                identifiers.update(re.findall(r"\b(?:cmark_\w+|CMARK_\w+|houdini_\w+|_cmarkup_\w+)\b", path.read_text()))
+        mapping = {name: ("AIMARKDOWN_" if name.startswith("CMARK_") else "aimarkdown_") + name
+                   for name in identifiers | set(original_symbols)}
+        mapping.update(MODULES)
+        headers = {path.name: "aimarkdown-" + path.name for path in output.rglob("*.h")}
+        for path in output.rglob("*"):
+            if not path.is_file() or "Licenses" in path.parts:
+                continue
+            content = path.read_text()
+            content = TOKENS.sub(lambda match: mapping.get(match[0], match[0]), content)
+            # Explicit module scanning selects dependencies by header name; isolate filenames to prevent the official module from selecting this copy.
+            content = re.sub(r'(?m)(#\s*include\s*[<"]|\bheader\s+")([^>"\n]+)([>"])',
+                             lambda match: match[1] + headers.get(match[2], match[2]) + match[3], content)
+            content = "// AI Markdown custom parser with isolated modules and C symbols; provenance and rebuild rules: Vendor/Parser/manifest.json.\n" + content
+            path.write_text(content)
+        for path in list(output.rglob("*.h")):
+            path.rename(path.with_name(headers[path.name]))
+        renamed = symbols(output)
+        expected = sorted(mapping[name] for name in original_symbols)
+        if renamed != expected:
+            raise RuntimeError("C symbol prefix audit failed")
+        manifest = {
+            "schemaVersion": 3,
+            "generatorSHA256": sha(Path(__file__)),
+            "upstream": {name: {"url": f"https://github.com/ai-markdown/{name}.git", "revision": revision}
+                         for name, revision in gitlinks().items()},
+            "licenseHashes": hashes(ROOT / "Licenses"),
+            "swiftModule": "AIMarkdownParser", "cModules": list(MODULES.values()),
+            "selection": [{"upstream": name, "source": source, "destination": dest, "suffixes": sorted(suffixes)}
+                          for name, source, dest, suffixes in selections],
+            "transform": "Export pinned fork sources and isolate modules, C identifiers, and headers without reapplying semantic patches.",
+            "headerNames": dict(sorted(headers.items())),
+            "cGlobalSymbols": {name: mapping[name] for name in original_symbols},
+            "files": hashes(output),
+        }
+        (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+
+
+def check():
+    manifest = json.loads((DEST / "manifest.json").read_text())
+    if manifest["generatorSHA256"] != sha(Path(__file__)):
+        raise RuntimeError("The generator has changed; rebuild the snapshot")
+    if manifest["licenseHashes"] != hashes(ROOT / "Licenses"):
+        raise RuntimeError("License sources have changed")
+    actual = hashes(DEST)
+    if actual != manifest["files"]:
+        raise RuntimeError("Generated output does not match the manifest")
+    print(f"Parser snapshot verified: {len(actual)} files/{len(manifest['cGlobalSymbols'])} C symbols")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Check source and license hashes without upstream checkouts or a compiler")
+    parser.add_argument("--rebuild-check", action="store_true", help="Rebuild from pinned Git objects and compare bytes without modifying Vendor")
+    parser.add_argument("--markdown-checkout", type=Path, default=ROOT / "upstream/swift-markdown")
+    parser.add_argument("--cmark-checkout", type=Path, default=ROOT / "upstream/swift-cmark")
+    args = parser.parse_args()
+    if args.check:
+        check()
+    if args.rebuild_check or not args.check:
+        with tempfile.TemporaryDirectory(prefix="aimarkdown-vendor-output-") as temp:
+            output = Path(temp) / "Parser"
+            output.mkdir()
+            generate(args, output)
+            if args.rebuild_check:
+                if hashes(output) != hashes(DEST) or (output / "manifest.json").read_bytes() != (DEST / "manifest.json").read_bytes():
+                    raise RuntimeError("The rebuild from pinned Git objects differs from Vendor")
+                print("The rebuild from pinned Git objects is byte-identical to Vendor")
+            else:
+                if DEST.exists():
+                    shutil.rmtree(DEST)
+                DEST.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(output, DEST)
+                check()
+
+
+if __name__ == "__main__":
+    main()

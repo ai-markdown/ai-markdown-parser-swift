@@ -1,0 +1,6 @@
+// AI Markdown custom parser with isolated modules and C symbols; provenance and rebuild rules: Vendor/Parser/manifest.json.
+
+module AIMarkdownCMarkExtensions {
+  header "aimarkdown-cmark-gfm-core-extensions.h"
+}
+

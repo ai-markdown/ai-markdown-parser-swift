@@ -13,4 +13,3 @@ See [README.md](README.md) for this repository's purpose, package structure, and
 - Preserve module, C symbol, and header isolation, and validate coexistence with the official parser after migration or upgrades.
 - Maintenance tools may use submodules; ordinary SwiftPM consumption must not require submodule initialization, generators, or the workspace.
 - Run checks appropriate to each change. Keep full logs and one-time migration archives outside the source tree; retain reproducible checks, tests, source manifests, and licenses in this repository. Do not present historical results as new validation.
-- This revision contains only the repository skeleton and upstream baseline pins; it does not yet provide an independent package or the migrated implementation.

@@ -1,43 +1,50 @@
 # AI Markdown Parser Swift
 
-Integration and distribution repository for the custom Markdown parser used by [ai-markdown-swift](https://github.com/ai-markdown/ai-markdown-swift).
+A custom Markdown parser for Swift, used by the Engine in [ai-markdown-swift](https://github.com/ai-markdown/ai-markdown-swift). Its module and C symbol names are isolated from the official Markdown package.
 
-At this stage, the two upstream fork submodules and initial migration baselines are established. The existing Vendor patches, isolation generator, generated sources, and Swift Package manifest have not yet been added. The main library still uses its own Vendor directory; this repository is not yet an installable parser package.
+`Package.swift` provides `AIMarkdownParser`, plus `AIMarkdownCMark` and `AIMarkdownCMarkExtensions` for low-level integration tests. These are implementation dependencies of the main library; no long-term general-purpose parser API stability is promised. Minimum platforms are iOS 26 and macOS 26, with Swift tools 6.2; upstream Swift sources retain Swift 5 language mode.
 
-## Layout and pinned versions
+## Sources and distribution
 
-| Directory | Source fork | Initial commit |
-| --- | --- | --- |
-| `upstream/swift-markdown` | [ai-markdown/swift-markdown](https://github.com/ai-markdown/swift-markdown) | `25cb61d3482054b09ae76ca4f281b1bfe7fe5a43`, upstream 0.9.0 |
-| `upstream/swift-cmark` | [ai-markdown/swift-cmark](https://github.com/ai-markdown/swift-cmark) | `08ddb528923cc1a6527e02b7a1aee9e516ca749a`, upstream 0.9.0 |
+- `upstream/swift-markdown`: the organization fork containing the Swift AST, CAtomic, and the custom Swift implementation.
+- `upstream/swift-cmark`: the organization fork containing the C core, extensions, and the custom C implementation.
+- `Vendor/Parser`: checked-in isolated sources generated from the two pinned gitlink commits. Ordinary SwiftPM builds use these files directly without initializing submodules, accessing the workspace, running Python, or replaying patches.
+- `Licenses`: all third-party licenses for the implementation; original upstream licenses and source copyright notices are preserved.
+- `Tests/UpstreamMarkdownTests`: pinned upstream tests with only module imports and two qualified type names changed; assertions and resources are unchanged.
+- `Tests/ParserBoundaryTests`: checks for cross-package public fields, custom syntax, metadata, and C node lifetimes.
 
-The Swift Markdown layer depends on CAtomic and the CMark core and extensions. CAtomic belongs to the swift-markdown repository. The CMark extensions belong to swift-cmark and depend internally on its core; these components do not need separate repositories.
+The initial migration retains the swift-markdown / swift-cmark 0.9.0 baselines without upgrading upstream. The semantic patches were committed to the two forks in the original generation order. `scripts/generate-parser.py` exports fixed commits and applies name isolation; it **does not apply the patches again**. Implementation provenance is maintained in each fork under `AIMarkdown/provenance.json`; this package records its exact source revisions and license hashes in `Vendor/Parser/manifest.json`.
 
-The two gitlinks are the actual version pins. This table records the initial migration baselines and does not replace subsequent submodule commit records.
+## Development and validation
 
-## Development checkout
-
-Clone the repository and check out the recorded versions:
-
-```sh
-git clone --recurse-submodules git@github.com:ai-markdown/ai-markdown-parser-swift.git
-```
-
-Initialize submodules in an existing clone:
+Initial maintenance checkout:
 
 ```sh
-git submodule update --init
+git clone git@github.com:ai-markdown/ai-markdown-parser-swift.git
+cd ai-markdown-parser-swift
+git submodule update --init --checkout
+swift test
+python3 scripts/generate-parser.py --check
+python3 scripts/sync-upstream-tests.py --check
 ```
 
-This command checks out the commits recorded by the parent repository. Do not run it unconditionally when development branches or working tree changes already exist. The workspace initialization script initializes only missing submodule checkouts and preserves existing work.
+Ordinary builds and the read-only integrity checks above do not require submodule contents. Maintainers need both fork object databases, Python, Git, Clang, and nm only for regeneration:
 
-An ordinary submodule checkout usually has a detached HEAD. Before editing, create or switch to the fork's `ai-markdown` maintenance branch from a confirmed baseline. Do not substitute `git submodule update --remote` for a validated version upgrade. The initial local maintenance branches were created during workspace setup; remote publication is tracked separately.
+```sh
+python3 scripts/generate-parser.py --check --rebuild-check
+python3 scripts/sync-upstream-tests.py --check --rebuild-check
+```
 
-## Remaining migration and release work
+Both entries in `.gitmodules` set `update = none` so SwiftPM does not automatically fetch maintenance submodules during Git URL installation. Maintainers and regeneration CI must explicitly use `--checkout` as shown above.
 
-1. Commit the main library's existing Swift/C implementation patches to the two fork maintenance branches, preserving upstream history and licenses.
-2. Add the isolation generator, related tests, and provenance manifests here, then generate checked-in sources from fixed gitlinks.
-3. Create a Swift Package that compiles the internal Swift/C targets together. Consumers must not need to run generators or initialize submodules.
-4. Complete source regeneration, official dependency coexistence, Web semantic comparisons, and macOS/iOS integration regression checks before switching the main library's dependency.
+An ordinary submodule checkout usually has a detached HEAD. Switch to the corresponding fork's `ai-markdown` maintenance branch before editing. Do not substitute `git submodule update --remote` for a validated upgrade, and do not run submodule updates unconditionally when development branches or uncommitted changes already exist.
 
-Before publishing an integration version, ensure both referenced fork commits are available remotely; update the main library's dependency afterward. The forks are the implementation source of truth. Generated output is not a second manually maintained implementation.
+For a coordinated update: commit implementation changes in the forks, stage the exact gitlinks in this repository, run the generators, execute standalone and main-library integration regression checks, then commit the pointers and outputs together. The generator reads stage-0 gitlinks from the index, not uncommitted fork working tree sources. CI regenerates from committed gitlinks and compares the output byte for byte.
+
+Before release, ensure the referenced fork commits are available remotely, then publish the integration package version and update the main library's dependency. Do not edit generated output manually. Upstream synchronization does not automatically upgrade the main library.
+
+## Validation
+
+Run `swift test` and `swift test -c release` for the upstream and package-boundary suites. `Tests/UpstreamMarkdownTests.manifest.json` records the upstream test revision and original/generated file hashes.
+
+Keep full command logs, one-time migration archives, and validation run results outside the source tree, such as local build output or CI artifacts. The package retains reproducible checks, test sources, license records, and source manifests rather than historical run artifacts.

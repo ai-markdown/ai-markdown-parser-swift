@@ -1,0 +1,26 @@
+// AI Markdown custom parser with isolated modules and C symbols; provenance and rebuild rules: Vendor/Parser/manifest.json.
+module AIMarkdownCMark {
+    header "aimarkdown-cmark-gfm.h"
+    header "aimarkdown-cmark-gfm_config.h"
+    header "aimarkdown-cmark-gfm-extension_api.h"
+    header "aimarkdown-buffer.h"
+    header "aimarkdown-chunk.h"
+    header "aimarkdown-cmark_ctype.h"
+    header "aimarkdown-export.h"
+    header "aimarkdown-footnotes.h"
+    header "aimarkdown-houdini.h"
+    header "aimarkdown-html.h"
+    header "aimarkdown-inlines.h"
+    header "aimarkdown-iterator.h"
+    header "aimarkdown-map.h"
+    header "aimarkdown-node.h"
+    header "aimarkdown-parser.h"
+    header "aimarkdown-plugin.h"
+    header "aimarkdown-references.h"
+    header "aimarkdown-registry.h"
+    header "aimarkdown-render.h"
+    header "aimarkdown-scanners.h"
+    header "aimarkdown-syntax_extension.h"
+    header "aimarkdown-utf8.h"
+    export *
+}
