@@ -841,6 +841,22 @@ AIMARKDOWN_CMARK_GFM_EXPORT int aimarkdown_cmark_node_get_softbreak_ending(aimar
 /** Returns 0 when spread was not captured, 1 when not spread, 2 when spread. */
 AIMARKDOWN_CMARK_GFM_EXPORT int aimarkdown_cmark_node_get_list_spread(aimarkdown_cmark_node *node);
 
+/** Record Web mdast positions derived from actual parser events: container and
+ * code block boundaries from the block-parser ledger, and inline nodes from
+ * inline-subject offsets mapped through each content line's physical start.
+ * Existing source positions, rendering and tightness are unchanged. */
+#define AIMARKDOWN_CMARK_OPT_WEB_POSITIONS (1 << 6)
+/** Writes the captured Web position as 1-based lines and byte columns with an
+ * exclusive end. Returns a mask: 1 when the start was captured, 2 when the end
+ * was captured; 0 when nothing was captured. Callers must not substitute values. */
+AIMARKDOWN_CMARK_GFM_EXPORT int aimarkdown_cmark_node_get_web_position(aimarkdown_cmark_node *node, int *start_line,
+                                                 int *start_column, int *end_line,
+                                                 int *end_column);
+/** With CMARK_OPT_WEB_POSITIONS, the number of cells the table row scan found
+ * before cells beyond the header's columns were dropped or missing cells were
+ * added; 0 when not captured. */
+AIMARKDOWN_CMARK_GFM_EXPORT int aimarkdown_cmark_node_get_web_table_cells(aimarkdown_cmark_node *node);
+
 AIMARKDOWN_CMARK_GFM_EXPORT int aimarkdown_cmark_node_get_code_metadata_kind(aimarkdown_cmark_node *node);
 AIMARKDOWN_CMARK_GFM_EXPORT const char *aimarkdown_cmark_node_get_code_metadata_value(aimarkdown_cmark_node *node);
 AIMARKDOWN_CMARK_GFM_EXPORT const char *aimarkdown_cmark_node_get_code_metadata_info(aimarkdown_cmark_node *node);

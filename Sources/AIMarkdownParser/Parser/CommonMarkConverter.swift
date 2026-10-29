@@ -223,6 +223,7 @@ struct MarkupParser {
                     state = state.next()
                 default:
                     let conversion = convertLeaf(state)
+                    recordWebRange(conversion.result, from: state)
                     guard !frames.isEmpty else { return conversion }
                     frames[frames.count - 1].children.append(conversion.result)
                     state = conversion.state
@@ -232,11 +233,26 @@ struct MarkupParser {
                 guard let frame = frames.popLast() else { preconditionFailure("Missing cmark container conversion frame") }
                 precondition(state.node == frame.state.node)
                 let result = finishContainer(frame, exit: state)
+                recordWebRange(result, from: frame.state)
                 state = state.next(clearPendingTableBody: frame.type == .table)
                 guard !frames.isEmpty else { return MarkupConversion(state: state, result: result) }
                 frames[frames.count - 1].children.append(result)
             }
         }
+    }
+
+    /// Attaches the parser-event Web position of the converted cmark node, if both ends were captured,
+    /// and a table row's scanned cell count.
+    /// The result was just created by this conversion and is not yet shared.
+    private static func recordWebRange(_ raw: RawMarkup, from state: MarkupConverterState) {
+        let cells = aimarkdown_cmark_node_get_web_table_cells(state.node)
+        if cells > 0 { raw.header.parsedTableCellCount = Int(cells) }
+        var startLine: Int32 = 0, startColumn: Int32 = 0, endLine: Int32 = 0, endColumn: Int32 = 0
+        guard aimarkdown_cmark_node_get_web_position(state.node, &startLine, &startColumn, &endLine, &endColumn) == 3 else { return }
+        let start = SourceLocation(line: Int(startLine), column: Int(startColumn), source: state.source)
+        let end = SourceLocation(line: Int(endLine), column: Int(endColumn), source: state.source)
+        guard start <= end else { return }
+        raw.header.parsedWebRange = start..<end
     }
 
     /// Parser-ledger spread evidence: 0 means not captured, 1 not spread, 2 spread.
@@ -480,6 +496,7 @@ struct MarkupParser {
         if options.contains(.parseWebCodeSyntax) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_WEB_CODE_SYNTAX }
         if options.contains(.parseSoftBreakMetadata) { cmarkOptions |= Int32(AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA) }
         if options.contains(.parseListSpreadMetadata) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_LIST_SPREAD_METADATA }
+        if options.contains(.parseWebPositions) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_WEB_POSITIONS }
         if options.contains(.parseCodeMetadata) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_CODE_METADATA }
         if options.contains(.parseWebCharacterReferences) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES }
         if options.contains(.parseReferenceUsages) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES }

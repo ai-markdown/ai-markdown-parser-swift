@@ -42,6 +42,18 @@ struct RangeAdjuster: MarkupWalker {
         // This should only ever be called during parsing.
 
         markup.raw.markup.header.parsedRange = adjustedRange
+        // A Web end may sit at the start of the line after the run; drop evidence that cannot be mapped.
+        markup.raw.markup.header.parsedWebRange = markup.parsedWebRange.flatMap { range -> SourceRange? in
+            let lines = trimmedIndentationPerLine
+            guard lines.indices.contains(range.lowerBound.line - 1), lines.indices.contains(range.upperBound.line - 1) else { return nil }
+            let start = SourceLocation(line: startLine + range.lowerBound.line - 1,
+                                       column: range.lowerBound.column + lines[range.lowerBound.line - 1],
+                                       source: range.lowerBound.source)
+            let end = SourceLocation(line: startLine + range.upperBound.line - 1,
+                                     column: range.upperBound.column + lines[range.upperBound.line - 1],
+                                     source: range.upperBound.source)
+            return start..<end
+        }
 
         for child in markup.children {
             child.accept(&self)

@@ -50,6 +50,9 @@ public struct ParseOptions: OptionSet, Sendable {
     /// Derive Web mdast list and list-item `spread` from block-parser events without changing display or `tight`.
     public static let parseListSpreadMetadata = ParseOptions(rawValue: 1 << 18)
 
+    /// Record Web mdast positions from parser events (``Markup/parsedWebRange``) without changing `range`, display or formatting.
+    public static let parseWebPositions = ParseOptions(rawValue: 1 << 19)
+
     /// Accept Web code delimiter lengths without the legacy 80/255 limits.
     public static let parseWebCodeSyntax = ParseOptions(rawValue: 1 << 16)
 

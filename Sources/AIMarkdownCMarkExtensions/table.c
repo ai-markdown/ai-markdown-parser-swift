@@ -400,6 +400,54 @@ static table_row *row_from_string(aimarkdown_cmark_syntax_extension *self,
   return row;
 }
 
+/* Web positions (CMARK_OPT_WEB_POSITIONS) from this row scan. micromark's
+ * table row starts at the row's first non-whitespace character and ends at the
+ * physical end of the line. A cell starts at its leading pipe, or at the row
+ * start, and ends where the next scanned cell starts; the last scanned cell
+ * ends at the row end. Cells beyond the header's columns, which this parser
+ * drops, still bound the previous cell, and their number is recorded. */
+static int web_cell_start(const unsigned char *string, const table_row *row,
+                          const node_cell *cell) {
+  return cell->start_offset > row->paragraph_offset && string[cell->start_offset - 1] == '|'
+             ? cell->start_offset - 1
+             : cell->start_offset;
+}
+
+static int web_line_end(const unsigned char *string, int len) {
+  while (len > 0 && (string[len - 1] == '\n' || string[len - 1] == '\r'))
+    len--;
+  return len;
+}
+
+/* The cell scanner treats any backslash before a pipe as an escape, while
+ * micromark reads `\\` as an escaped backslash followed by a divider; such
+ * rows may split differently and get no Web evidence. */
+static bool web_row_scan_comparable(const unsigned char *string, int from, int to) {
+  for (int i = from; i < to; i++)
+    if (string[i] == '|' && i >= from + 2 && string[i - 1] == '\\' && string[i - 2] == '\\')
+      return false;
+  return true;
+}
+
+/* `column` is the source column of string offset 0 on `line`. */
+static void web_row_positions(aimarkdown_cmark_node *row_node, const table_row *row,
+                              const unsigned char *string, int line_end, int line,
+                              int column) {
+  if (!web_row_scan_comparable(string, row->paragraph_offset, line_end))
+    return;
+  aimarkdown_cmark_web_position_set_start(row_node, line, column + row->paragraph_offset);
+  aimarkdown_cmark_web_position_set_end(row_node, line, column + line_end);
+  row_node->web_table_cells = row->n_columns;
+  int i = 0;
+  for (aimarkdown_cmark_node *cell = row_node->first_child; cell && i < row->n_columns;
+       cell = cell->next, i++) {
+    int start = web_cell_start(string, row, &row->cells[i]);
+    int end = i + 1 < row->n_columns ? web_cell_start(string, row, &row->cells[i + 1]) : line_end;
+    aimarkdown_cmark_web_position_set_start(cell, line, column + start);
+    aimarkdown_cmark_web_position_set_end(cell, line, column + end);
+  }
+}
+
 static void try_inserting_table_header_paragraph(aimarkdown_cmark_parser *parser,
                                                  aimarkdown_cmark_node *parent_container,
                                                  unsigned char *parent_string,
@@ -483,6 +531,19 @@ static aimarkdown_cmark_node *try_opening_table_header(aimarkdown_cmark_syntax_e
     }
   }
 
+  /* The header row is the paragraph's last content line: resolve its physical
+   * start before the type change releases the paragraph's line records. */
+  int web_header_line = 0, web_header_column = 0;
+  if (parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) {
+    for (size_t r = 0; r < parent_container->math_line_count; r++) {
+      const aimarkdown_cmark_math_line *row = &parent_container->math_lines[r];
+      if (row->offset == header_row->paragraph_offset) {
+        web_header_line = row->line;
+        web_header_column = row->column - row->offset;
+      }
+    }
+  }
+
   if (!aimarkdown_cmark_node_set_type(parent_container, AIMARKDOWN_CMARK_NODE_TABLE)) {
     free_table_row(parser->mem, header_row);
     free_table_row(parser->mem, delimiter_row);
@@ -548,6 +609,17 @@ static aimarkdown_cmark_node *try_opening_table_header(aimarkdown_cmark_syntax_e
   }
 
   incr_table_row_count(parent_container, i);
+
+  if (web_header_line) {
+    const unsigned char *string = (const unsigned char *)parent_string;
+    web_row_positions(table_header, header_row, string,
+                      web_line_end(string, (int)strlen(parent_string)), web_header_line,
+                      web_header_column);
+    aimarkdown_cmark_web_position_set_start(parent_container, web_header_line,
+                                 web_header_column + header_row->paragraph_offset);
+    aimarkdown_cmark_web_position_set_end(parent_container, aimarkdown_cmark_parser_get_line_number(parser),
+                               web_line_end(input, len) + 1);
+  }
 
   aimarkdown_cmark_parser_advance_offset(
       parser, (char *)input,
@@ -652,6 +724,17 @@ static aimarkdown_cmark_node *try_opening_table_row(aimarkdown_cmark_syntax_exte
           parser, table_row_block, AIMARKDOWN_CMARK_NODE_TABLE_CELL, 0);
       aimarkdown_cmark_node_set_syntax_extension(node, self);
       set_cell_index(node, i);
+    }
+
+    if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) &&
+        (parent_container->web_position_flags & AIMARKDOWN_CMARK_WEB_POSITION_END)) {
+      int first_nonspace = aimarkdown_cmark_parser_get_first_nonspace(parser);
+      const unsigned char *string = input + first_nonspace;
+      int line_end = web_line_end(string, len - first_nonspace);
+      web_row_positions(table_row_block, row, string, line_end,
+                        aimarkdown_cmark_parser_get_line_number(parser), first_nonspace + 1);
+      aimarkdown_cmark_web_position_set_end(parent_container, aimarkdown_cmark_parser_get_line_number(parser),
+                                 first_nonspace + 1 + line_end);
     }
   }
 

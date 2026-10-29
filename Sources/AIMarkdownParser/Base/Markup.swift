@@ -384,6 +384,14 @@ extension Markup {
     /// This is neither a stable render identity nor a claim of exact character mapping.
     public var sourceOriginID: UInt64? { _data.raw.markup.header.sourceOriginID }
 
+    /// AIMarkdown: the Web mdast position of this node derived from actual parser events,
+    /// as 1-based lines and UTF-8 columns with an exclusive end.
+    ///
+    /// Captured only with ``ParseOptions/parseWebPositions`` and only where the parser recorded
+    /// the events that determine it; `nil` otherwise, including for programmatically created
+    /// nodes. It is parse evidence and is not recomputed after edits.
+    public var parsedWebRange: SourceRange? { _data.raw.markup.header.parsedWebRange }
+
     /// Explicitly associates a derived node with its actual original syntax contribution.
     /// New nodes have no origin until the transforming caller supplies one.
     public func withSourceOrigin(_ identifier: UInt64?) -> Self {

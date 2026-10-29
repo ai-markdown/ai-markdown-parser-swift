@@ -96,6 +96,12 @@ struct aimarkdown_cmark_node {
   int softbreak_ending; /* 0 absent, 10 LF, 13 CR, 0x0d0a CRLF; parser event evidence. */
   int list_spread; /* 0 not captured, 1 not spread, 2 spread; list/item parser ledger evidence. */
   int list_spread_id; /* Parser-local ledger identity; 0 when the node was never recorded. */
+  /* CMARK_OPT_WEB_POSITIONS evidence: WEB_POSITION_* flags, 1-based lines and
+   * byte columns, exclusive end. Inline nodes first hold inline-subject offsets. */
+  int web_position_flags;
+  int web_start_line, web_start_column, web_end_line, web_end_column;
+  int web_subject_start, web_subject_end;
+  int web_table_cells; /* raw cells in a table row before column truncation; 0 unknown */
   aimarkdown_cmark_code_metadata *code_metadata;
   struct aimarkdown_cmark_syntax_extension *task_extension;
   int task_content_line;
@@ -240,11 +246,26 @@ void aimarkdown_cmark_list_spread_open(struct aimarkdown_cmark_parser *parser, a
 void aimarkdown_cmark_list_spread_close(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
 void aimarkdown_cmark_list_spread_leaf(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *leaf, bool closed);
 void aimarkdown_cmark_list_spread_prefix_only(struct aimarkdown_cmark_parser *parser, bool prefix_only);
-void aimarkdown_cmark_list_spread_end_line(struct aimarkdown_cmark_parser *parser, bool has_line_ending);
+void aimarkdown_cmark_list_spread_end_line(struct aimarkdown_cmark_parser *parser, bool has_line_ending, int content_length);
 void aimarkdown_cmark_list_spread_eof(struct aimarkdown_cmark_parser *parser);
 void aimarkdown_cmark_list_spread_unsupported(struct aimarkdown_cmark_parser *parser);
 void aimarkdown_cmark_list_spread_finish(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *root);
 void aimarkdown_cmark_list_spread_free(struct aimarkdown_cmark_parser *parser);
+void aimarkdown_cmark_list_spread_continued(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *last_matched);
+void aimarkdown_cmark_list_spread_leaf_prefix(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *leaf);
+void aimarkdown_cmark_list_spread_indent(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *code, bool qualified);
+void aimarkdown_cmark_list_spread_item_prefix(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *item, int end_column);
+
+enum {
+  AIMARKDOWN_CMARK_WEB_POSITION_START = 1,
+  AIMARKDOWN_CMARK_WEB_POSITION_END = 2,
+  /* Inline-subject offsets are pending conversion to source points. */
+  AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT = 4,
+  /* The end offset is just after a line ending; Web places it at the next line start. */
+  AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT_EOL = 8
+};
+void aimarkdown_cmark_web_position_set_start(aimarkdown_cmark_node *node, int line, int column);
+void aimarkdown_cmark_web_position_set_end(aimarkdown_cmark_node *node, int line, int column);
 
 #ifdef __cplusplus
 }

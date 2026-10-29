@@ -104,6 +104,17 @@ public struct RawMarkupHeader {
     /// > Warning: This should only ever be mutated by `RangeAdjuster` while
     /// > parsing. **Do not** expose this through any public API.
     var parsedRange: SourceRange?
+
+    /// AIMarkdown: the Web mdast position recorded from actual parser events when
+    /// `ParseOptions.parseWebPositions` is enabled; `nil` when not captured.
+    ///
+    /// Like `parsedRange`, this is parse evidence: it is carried with the node and
+    /// is never recomputed after edits. Only `RangeAdjuster` may mutate it while parsing.
+    var parsedWebRange: SourceRange? = nil
+
+    /// AIMarkdown: for a parsed table row, the number of cells the parser's row scan found
+    /// before cells beyond the header's columns were dropped or missing cells were added.
+    var parsedTableCellCount: Int? = nil
 }
 
 final class RawMarkup: ManagedBuffer<RawMarkupHeader, RawMarkup> {
@@ -116,13 +127,15 @@ final class RawMarkup: ManagedBuffer<RawMarkupHeader, RawMarkup> {
             }
         }
     }
-    private static func create(data: RawMarkupData, parsedRange: SourceRange?, children: [RawMarkup], sourceOriginID: UInt64? = nil) -> RawMarkup {
+    private static func create(data: RawMarkupData, parsedRange: SourceRange?, children: [RawMarkup], sourceOriginID: UInt64? = nil, parsedWebRange: SourceRange? = nil, parsedTableCellCount: Int? = nil) -> RawMarkup {
         let buffer = self.create(minimumCapacity: children.count) { _ in
             RawMarkupHeader(data: data,
                             sourceOriginID: sourceOriginID,
                             childCount: children.count,
                             subtreeCount: /* self */ 1 + children.subtreeCount,
-                            parsedRange: parsedRange)
+                            parsedRange: parsedRange,
+                            parsedWebRange: parsedWebRange,
+                            parsedTableCellCount: parsedTableCellCount)
         }
         let raw = unsafeDowncast(buffer, to: RawMarkup.self)
         var children = children
@@ -216,15 +229,19 @@ final class RawMarkup: ManagedBuffer<RawMarkupHeader, RawMarkup> {
             parsedRange = newChild.header.parsedRange
         }
 
-        return RawMarkup.create(data: header.data, parsedRange: parsedRange, children: newChildren, sourceOriginID: header.sourceOriginID)
+        return RawMarkup.create(data: header.data, parsedRange: parsedRange, children: newChildren, sourceOriginID: header.sourceOriginID,
+                                parsedWebRange: preserveRange ? header.parsedWebRange : nil,
+                                parsedTableCellCount: preserveRange ? header.parsedTableCellCount : nil)
     }
 
     func withChildren<Children: Collection>(_ newChildren: Children) -> RawMarkup where Children.Element == RawMarkup {
-        return .create(data: header.data, parsedRange: header.parsedRange, children: Array(newChildren), sourceOriginID: header.sourceOriginID)
+        return .create(data: header.data, parsedRange: header.parsedRange, children: Array(newChildren), sourceOriginID: header.sourceOriginID,
+                       parsedWebRange: header.parsedWebRange, parsedTableCellCount: header.parsedTableCellCount)
     }
 
     func withSourceOrigin(_ identifier: UInt64?) -> RawMarkup {
-        return .create(data: header.data, parsedRange: header.parsedRange, children: copyChildren(), sourceOriginID: identifier)
+        return .create(data: header.data, parsedRange: header.parsedRange, children: copyChildren(), sourceOriginID: identifier,
+                       parsedWebRange: header.parsedWebRange, parsedTableCellCount: header.parsedTableCellCount)
     }
 
     static func footnoteDefinition(label: String, parsedRange: SourceRange?, _ children: [RawMarkup]) -> RawMarkup {

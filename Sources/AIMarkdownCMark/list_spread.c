@@ -1,5 +1,6 @@
 // AI Markdown custom parser with isolated modules and C symbols; provenance and rebuild rules: scripts/parser-manifest.json.
-/* Opt-in list and list-item spread evidence.
+/* Opt-in list and list-item spread evidence, and Web container and code block
+ * positions.
  *
  * The block parser records which containers continue, open and close on each
  * physical line, which leaf block consumed the line, and whether the line had
@@ -15,6 +16,18 @@
  * exactly the parsed list's items. Otherwise, or for unsupported syntax such
  * as definition lists, the value stays 0 ("not captured"); callers must not
  * substitute a default.
+ *
+ * With CMARK_OPT_WEB_POSITIONS the same events carry source points: each
+ * line ending starts at the physical end of its line, list item prefixes end
+ * after the whitespace micromark includes in `listItemPrefix`, and container
+ * exits are placed where micromark's `document` tokenizer exits them (the start
+ * of the line for a new item in a continued list and for lines without new
+ * containers, after the continued prefixes before a new container, or at the
+ * end of input). The moved exit points and `prepareList`'s `listItem.end` give
+ * the Web end of lists, list items, block quotes and footnote definitions.
+ * Fenced and indented code block ends come from the recorded closing, last
+ * content and terminating lines. A point that would require a partially
+ * consumed tab stays unknown and suppresses the affected position.
  */
 
 #include <stdlib.h>
@@ -36,8 +49,13 @@ enum {
   R_CLOSE,         /* a: exit event type, b: container depth */
   R_LEAF,          /* a: LEAF_* flags */
   R_PREFIX_ONLY,   /* nothing but container prefixes remained on the line */
-  R_END_LINE,      /* a: 1 when the line had a physical line ending */
-  R_EOF
+  R_END_LINE,      /* a: 1 when the line had a physical line ending, b: content bytes */
+  R_EOF,
+  R_CONTINUED,     /* a: 1-based column after continued prefixes, 0 when unknown;
+                      b: 1 when every open container continued */
+  R_ITEM_PREFIX,   /* a: 1-based column where the item prefix ends, 0 when unknown */
+  R_INDENT,        /* indented code continuation; a: 1 when indented by four or more columns */
+  R_LEAF_PREFIX    /* a: 1-based column after container prefixes on a code continuation line */
 };
 
 enum {
@@ -66,8 +84,22 @@ typedef struct {
   int kind, id, a, b;
 } ls_record;
 
+/* A source point: line number and 1-based byte column; column 0 is unknown. */
+typedef struct {
+  int line, column;
+} ls_point;
+
+typedef struct {
+  int number, length; /* cmark line number and content bytes before the line ending */
+  bool has_eol, opens_container, lazy;
+  /* Column after container prefixes on a code continuation line; -1 when not
+   * recorded, 0 when unknown because of a partially consumed tab. */
+  int leaf_prefix_end;
+} ls_line;
+
 typedef struct {
   int type, id;
+  ls_point point; /* line ending start, item prefix end, or container exit */
 } ls_event;
 
 struct aimarkdown_cmark_list_spread_ledger {
@@ -75,10 +107,13 @@ struct aimarkdown_cmark_list_spread_ledger {
   size_t count, capacity;
   int next_id;
   bool in_line, unsupported, failed;
+  /* Web keeps footnote blank-line indentation for the flow; this parser does
+   * not, so indented code there makes positions (not spread) unverifiable. */
+  bool positions_unsupported;
 };
 
 static struct aimarkdown_cmark_list_spread_ledger *ledger(aimarkdown_cmark_parser *parser) {
-  if (!(parser->options & AIMARKDOWN_CMARK_OPT_LIST_SPREAD_METADATA))
+  if (!(parser->options & (AIMARKDOWN_CMARK_OPT_LIST_SPREAD_METADATA | AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)))
     return NULL;
   if (!parser->list_spread)
     parser->list_spread = (struct aimarkdown_cmark_list_spread_ledger *)parser->mem->calloc(
@@ -113,7 +148,71 @@ void aimarkdown_cmark_list_spread_line(aimarkdown_cmark_parser *parser) {
   if (l->in_line)
     l->unsupported = true; /* re-entrant line processing */
   l->in_line = true;
-  push(parser, R_LINE, 0, 0, 0);
+  push(parser, R_LINE, 0, parser->line_number, 0);
+}
+
+static bool is_container(aimarkdown_cmark_node *node) {
+  switch (node->type) {
+  case AIMARKDOWN_CMARK_NODE_DOCUMENT:
+  case AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE:
+  case AIMARKDOWN_CMARK_NODE_LIST:
+  case AIMARKDOWN_CMARK_NODE_ITEM:
+  case AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/* Records where continued container prefixes end and whether every open
+ * container continued; micromark marks a line lazy when some did not and no
+ * new container starts on it. */
+void aimarkdown_cmark_list_spread_continued(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *last_matched) {
+  if (!ledger(parser))
+    return;
+  bool all = true;
+  if (last_matched) {
+    aimarkdown_cmark_node *deepest = parser->root;
+    for (aimarkdown_cmark_node *node = parser->root; node; node = node->last_child) {
+      if (is_container(node))
+        deepest = node;
+      if (!node->last_child || !(node->last_child->flags & AIMARKDOWN_CMARK_NODE__OPEN))
+        break;
+    }
+    all = false;
+    for (aimarkdown_cmark_node *node = last_matched; node; node = node->parent)
+      if (node == deepest)
+        all = true;
+  }
+  push(parser, R_CONTINUED, 0, parser->partially_consumed_tab ? 0 : parser->offset + 1, all);
+}
+
+void aimarkdown_cmark_list_spread_indent(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *code, bool qualified) {
+  struct aimarkdown_cmark_list_spread_ledger *l = ledger(parser);
+  if (l)
+    push(parser, R_INDENT, node_id(l, code), qualified, 0);
+}
+
+void aimarkdown_cmark_list_spread_leaf_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *leaf) {
+  struct aimarkdown_cmark_list_spread_ledger *l = ledger(parser);
+  if (!l)
+    return;
+  /* Web keeps the indentation of a whitespace-only footnote line for the flow;
+   * this parser consumes it, so code there is not comparable. */
+  if (parser->blank && parser->curline.size && parser->curline.ptr[0] != '\n' &&
+      parser->curline.ptr[0] != '\r')
+    for (aimarkdown_cmark_node *parent = leaf->parent; parent; parent = parent->parent)
+      if (parent->type == AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION)
+        l->positions_unsupported = true;
+  push(parser, R_LEAF_PREFIX, node_id(l, leaf),
+         parser->partially_consumed_tab ? 0 : parser->offset + 1, 0);
+}
+
+void aimarkdown_cmark_list_spread_item_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *item,
+                                   int end_column) {
+  struct aimarkdown_cmark_list_spread_ledger *l = ledger(parser);
+  if (l)
+    push(parser, R_ITEM_PREFIX, node_id(l, item), end_column, 0);
 }
 
 void aimarkdown_cmark_list_spread_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container) {
@@ -197,12 +296,13 @@ void aimarkdown_cmark_list_spread_prefix_only(aimarkdown_cmark_parser *parser, b
     push(parser, R_PREFIX_ONLY, 0, 0, 0);
 }
 
-void aimarkdown_cmark_list_spread_end_line(aimarkdown_cmark_parser *parser, bool has_line_ending) {
+void aimarkdown_cmark_list_spread_end_line(aimarkdown_cmark_parser *parser, bool has_line_ending,
+                                int content_length) {
   struct aimarkdown_cmark_list_spread_ledger *l = ledger(parser);
   if (!l)
     return;
   l->in_line = false;
-  push(parser, R_END_LINE, 0, has_line_ending, 0);
+  push(parser, R_END_LINE, 0, has_line_ending, content_length);
 }
 
 void aimarkdown_cmark_list_spread_eof(aimarkdown_cmark_parser *parser) {
@@ -233,24 +333,33 @@ typedef struct {
   aimarkdown_cmark_mem *mem;
 } ls_events;
 
-static void emit(ls_events *events, int type, int id) {
+static void emit_at(ls_events *events, int type, int id, ls_point point) {
   if (events->count == events->capacity) {
     size_t capacity = events->capacity ? events->capacity * 2 : 256;
     events->items = (ls_event *)events->mem->realloc(events->items,
                                                      capacity * sizeof(ls_event));
     events->capacity = capacity;
   }
-  events->items[events->count++] = (ls_event){type, id};
+  events->items[events->count++] = (ls_event){type, id, point};
+}
+
+static void emit(ls_events *events, int type, int id) {
+  emit_at(events, type, id, (ls_point){0, 0});
 }
 
 typedef struct {
-  int last_line, last_content_line, closed_line;
+  int first_line, last_line, last_content_line, closed_line;
+  /* Indented code: the last line indented by four or more columns, which
+   * micromark's codeIndented reaches even when the line is blank. */
+  int last_indented_line;
+  /* Recorded while parsing: finalize reuses the HTML kind's storage. */
+  bool absorbing;
 } ls_leaf_info;
 
 /* Emit close records in [begin, end) innermost first, keeping record order
- * among containers at the same depth. */
+ * among containers at the same depth; all exits share the tokenizer point. */
 static void emit_closes(ls_events *events, const ls_record *records, size_t begin,
-                        size_t end) {
+                        size_t end, ls_point point) {
   int max_depth = -1;
   for (size_t i = begin; i < end; i++)
     if (records[i].kind == R_CLOSE && records[i].b > max_depth)
@@ -258,7 +367,7 @@ static void emit_closes(ls_events *events, const ls_record *records, size_t begi
   for (int depth = max_depth; depth >= 0; depth--)
     for (size_t i = begin; i < end; i++)
       if (records[i].kind == R_CLOSE && records[i].b == depth)
-        emit(events, records[i].a, records[i].id);
+        emit_at(events, records[i].a, records[i].id, point);
 }
 
 static void emit_prefixes(ls_events *events, const ls_record *records, size_t begin,
@@ -272,15 +381,20 @@ static void emit_prefixes(ls_events *events, const ls_record *records, size_t be
 }
 
 static void emit_opens(ls_events *events, const ls_record *records, size_t begin,
-                       size_t end) {
+                       size_t end, int line) {
   for (size_t i = begin; i < end; i++) {
     switch (records[i].kind) {
     case R_OPEN_LIST:
       emit(events, E_LIST_ENTER, records[i].id);
       break;
-    case R_OPEN_ITEM:
-      emit(events, E_ITEM_PREFIX, records[i].id);
+    case R_OPEN_ITEM: {
+      int column = 0;
+      for (size_t j = i + 1; j < end; j++)
+        if (records[j].kind == R_ITEM_PREFIX && records[j].id == records[i].id)
+          column = records[j].a;
+      emit_at(events, E_ITEM_PREFIX, records[i].id, (ls_point){line, column});
       break;
+    }
     case R_OPEN_QUOTE:
       emit(events, E_QUOTE_ENTER, records[i].id);
       emit(events, E_QUOTE_PREFIX, records[i].id);
@@ -320,6 +434,8 @@ static void move_container_exits(ls_events *events) {
     }
     if (found) {
       ls_event exit = events->items[index];
+      /* Fix position: the exit ends where the first moved line ending starts. */
+      exit.point = events->items[line_index].point;
       memmove(&events->items[line_index + 1], &events->items[line_index],
               (index - line_index) * sizeof(ls_event));
       events->items[line_index] = exit;
@@ -345,7 +461,7 @@ static void ids_push(aimarkdown_cmark_mem *mem, ls_ids *ids, int id) {
  * inserted tokens sit next to an item prefix or inside an already processed
  * inner list, so no later scan of this pass can reach them first. */
 static void prepare_list(ls_events *events, size_t start, size_t end, int *spread,
-                         ls_ids *items, aimarkdown_cmark_mem *mem) {
+                         ls_point *ends, ls_ids *items, aimarkdown_cmark_mem *mem) {
   int balance = -1;
   bool list_spread = false;
   int item = 0;
@@ -402,6 +518,8 @@ static void prepare_list(ls_events *events, size_t start, size_t end, int *sprea
           }
         }
         spread[item] = has_first_blank && (!has_line || first_blank < line_index) ? 2 : 1;
+        /* listItem.end: the earliest trailing line ending, else the boundary's end. */
+        ends[item] = has_line ? events->items[line_index].point : event->point;
       }
       if (event->type == E_ITEM_PREFIX) {
         item = event->id;
@@ -432,10 +550,91 @@ static bool has_unsupported_nodes(aimarkdown_cmark_node *root) {
   return result;
 }
 
+static ls_point line_end_point(const ls_line *line) {
+  return (ls_point){line->number, line->length + 1};
+}
+
+static void set_web_end(aimarkdown_cmark_node *node, ls_point point) {
+  if (point.line > 0 && point.column > 0)
+    aimarkdown_cmark_web_position_set_end(node, point.line, point.column);
+}
+
+/* The Web end of a concrete flow block that absorbs blank lines (fenced code,
+ * HTML kinds 1-5). A block closed by its end condition ends at the physical
+ * end of that line. A final line with only container prefixes never starts a
+ * flow chunk, so the block ends after the previous line ending; the end of
+ * input also ends it there. Otherwise its container did not continue on the
+ * next line: when that line opens a new container, micromark ends the flow at
+ * the start of the line after the line ending; for a lazy line
+ * `nonLazyContinuation` fails before the line ending. Returns false when a
+ * partially consumed tab leaves the prefix end unknown. */
+static bool absorbing_end(const ls_leaf_info *info, const ls_line *lines, size_t line_count,
+                          ls_point eof, ls_point *end) {
+  const ls_line *last = &lines[info->last_line];
+  if (info->closed_line >= 0)
+    *end = line_end_point(&lines[info->closed_line]);
+  else if (!last->has_eol && last->leaf_prefix_end == 0)
+    return false;
+  else if (!last->has_eol && last->leaf_prefix_end == last->length + 1)
+    *end = (ls_point){last->number, 1};
+  else if ((size_t)info->last_line + 1 >= line_count)
+    *end = eof;
+  else if (lines[info->last_line + 1].opens_container)
+    *end = (ls_point){lines[info->last_line + 1].number, 1};
+  else
+    *end = line_end_point(last);
+  return true;
+}
+
+/* Web `code` end: see absorbing_end for fenced code; indented code ends after
+ * its last line that codeIndented reaches. */
+static void set_code_position(aimarkdown_cmark_node *node, const ls_leaf_info *info,
+                              const ls_line *lines, size_t line_count, ls_point eof) {
+  if (info->last_line < 0) {
+    node->web_position_flags = 0;
+    return;
+  }
+  if (node->as.code.fenced) {
+    ls_point end;
+    if (absorbing_end(info, lines, line_count, eof, &end)) {
+      aimarkdown_cmark_web_position_set_start(node, node->start_line, node->start_column);
+      set_web_end(node, end);
+    }
+  } else if ((node->web_position_flags & AIMARKDOWN_CMARK_WEB_POSITION_START) &&
+             info->last_content_line >= 0) {
+    set_web_end(node, line_end_point(&lines[info->last_content_line]));
+  }
+  if (!(node->web_position_flags & AIMARKDOWN_CMARK_WEB_POSITION_END))
+    node->web_position_flags = 0;
+}
+
+/* Web htmlFlow end: kinds 1-5 as absorbing blocks; kinds 6 and 7 end after
+ * their last line, before the blank line, lazy line, new container or end of
+ * input that ends them. */
+static void set_html_position(aimarkdown_cmark_node *node, const ls_leaf_info *info,
+                              const ls_line *lines, size_t line_count, ls_point eof) {
+  ls_point end;
+  if (!(node->web_position_flags & AIMARKDOWN_CMARK_WEB_POSITION_START) || info->last_line < 0) {
+    node->web_position_flags = 0;
+    return;
+  }
+  if (info->absorbing) {
+    if (!absorbing_end(info, lines, line_count, eof, &end)) {
+      node->web_position_flags = 0;
+      return;
+    }
+  } else {
+    end = line_end_point(&lines[info->last_line]);
+  }
+  set_web_end(node, end);
+}
+
 void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *root) {
   struct aimarkdown_cmark_list_spread_ledger *l = parser->list_spread;
   if (!l)
     return;
+  bool positions = (parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) != 0 && !l->positions_unsupported;
+  bool spreads = (parser->options & AIMARKDOWN_CMARK_OPT_LIST_SPREAD_METADATA) != 0;
   if (l->unsupported || l->failed || l->in_line || has_unsupported_nodes(root)) {
     aimarkdown_cmark_list_spread_free(parser);
     return;
@@ -446,23 +645,69 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
   int ids = l->next_id + 1;
   ls_leaf_info *leaves = (ls_leaf_info *)mem->calloc((size_t)ids, sizeof(ls_leaf_info));
   for (int i = 0; i < ids; i++)
-    leaves[i] = (ls_leaf_info){-1, -1, -1};
+    leaves[i] = (ls_leaf_info){-1, -1, -1, -1, -1, false};
+  size_t line_count = 0;
+  for (size_t i = 0; i < count; i++)
+    if (records[i].kind == R_LINE)
+      line_count++;
+  ls_line *lines = (ls_line *)mem->calloc(line_count + 1, sizeof(ls_line));
 
-  /* Pass 1: the last line, last non-blank line and closing line of each leaf. */
+  /* Pass 1: the last line, last non-blank line and closing line of each leaf,
+   * and each line's number, length, line ending and container openings. */
   int line = -1;
   bool valid = true;
   for (size_t i = 0; i < count && valid; i++) {
     const ls_record *r = &records[i];
     if (r->kind == R_LINE) {
       line++;
+      lines[line].number = r->a;
+      lines[line].leaf_prefix_end = -1;
+    } else if (r->kind == R_END_LINE && line >= 0) {
+      lines[line].has_eol = r->a != 0;
+      lines[line].length = r->b;
+    } else if (r->kind >= R_OPEN_LIST && r->kind <= R_OPEN_FOOTNOTE && line >= 0) {
+      lines[line].opens_container = true;
+    } else if (r->kind == R_CONTINUED && line >= 0) {
+      lines[line].lazy = !r->b;
+    } else if (r->kind == R_LEAF_PREFIX && line >= 0) {
+      lines[line].leaf_prefix_end = r->a;
+    } else if (r->kind == R_INDENT && r->a) {
+      leaves[r->id].last_indented_line = line;
     } else if (r->kind == R_LEAF) {
       ls_leaf_info *info = &leaves[r->id];
+      if (info->first_line < 0)
+        info->first_line = line;
       info->last_line = line;
       if (!(r->a & LEAF_BLANK) || !(r->a & LEAF_INDENTED))
         info->last_content_line = line;
       if (r->a & LEAF_CLOSED)
         info->closed_line = line;
+      if (r->a & LEAF_ABSORBING)
+        info->absorbing = true;
     }
+  }
+  /* codeIndented's furtherStart crosses blank lines and continues on any line
+   * indented by four or more columns after container prefixes, so line endings
+   * before such a blank line stay inside the code token. */
+  for (size_t index = 0; index < line_count; index++)
+    if (lines[index].opens_container)
+      lines[index].lazy = false;
+  /* furtherStart fails at a lazy line, so a lazy line in the code keeps it there. */
+  for (int id = 0; id < ids; id++) {
+    ls_leaf_info *info = &leaves[id];
+    if (info->last_indented_line <= info->last_content_line || info->first_line < 0)
+      continue;
+    bool lazy = false;
+    for (int index = info->first_line; index <= info->last_indented_line; index++)
+      lazy = lazy || lines[index].lazy;
+    if (!lazy)
+      info->last_content_line = info->last_indented_line;
+  }
+  /* micromark's end-of-input point. */
+  ls_point eof = {1, 1};
+  if (line_count) {
+    const ls_line *last = &lines[line_count - 1];
+    eof = last->has_eol ? (ls_point){last->number + 1, 1} : line_end_point(last);
   }
 
   /* Pass 2: expand each line into ordered document and flow-boundary events. */
@@ -471,7 +716,7 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
   size_t i = 0;
   while (i < count && valid) {
     if (records[i].kind == R_EOF) {
-      emit_closes(&events, records, i + 1, count);
+      emit_closes(&events, records, i + 1, count, eof);
       i = count;
       break;
     }
@@ -489,8 +734,10 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
     }
     size_t end = i++;
     line++;
+    const ls_line *physical = &lines[line];
     bool new_item_in_list = false, new_container = false, prefix_only = false;
     int leaf = 0, leaf_flags = 0;
+    ls_point continued = {physical->number, 0};
     for (size_t j = begin; j < end; j++) {
       const ls_record *r = &records[j];
       if (r->kind == R_OPEN_ITEM && r->b)
@@ -499,6 +746,8 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
         new_container = true;
       if (r->kind == R_PREFIX_ONLY)
         prefix_only = true;
+      if (r->kind == R_CONTINUED)
+        continued.column = r->a;
       if (r->kind == R_LEAF) {
         if (leaf && leaf != r->id)
           valid = false; /* one flow leaf per physical line is expected */
@@ -513,29 +762,32 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
      * after continued prefixes; a non-lazy line without new containers places
      * exits after the previous line. */
     bool has_eol = records[end].a != 0;
+    ls_point line_start = {physical->number, 1};
     /* At end of input with only prefixes on the final line, micromark never
      * starts a flow chunk and exits remaining containers after the prefixes. */
     if ((new_container && !new_item_in_list) ||
         (!new_container && prefix_only && !has_eol)) {
       emit_prefixes(&events, records, begin, end);
-      emit_closes(&events, records, begin, end);
+      emit_closes(&events, records, begin, end, new_container ? continued : eof);
     } else {
-      emit_closes(&events, records, begin, end);
+      emit_closes(&events, records, begin, end, line_start);
       emit_prefixes(&events, records, begin, end);
     }
-    emit_opens(&events, records, begin, end);
+    emit_opens(&events, records, begin, end, physical->number);
 
+    ls_point eol = line_end_point(physical);
     if (!leaf) {
       if (has_eol)
-        emit(&events, E_LINE_ENDING_BLANK, 0);
+        emit_at(&events, E_LINE_ENDING_BLANK, 0, eol);
       continue;
     }
     const ls_leaf_info *info = &leaves[leaf];
-    if ((leaf_flags & LEAF_INDENTED) && (leaf_flags & LEAF_BLANK)) {
+    if ((leaf_flags & LEAF_INDENTED) && (leaf_flags & LEAF_BLANK) &&
+        info->last_content_line != line) {
       if (info->last_content_line > line)
         emit(&events, E_CONTENT, 0);
       else if (has_eol)
-        emit(&events, E_LINE_ENDING_BLANK, 0);
+        emit_at(&events, E_LINE_ENDING_BLANK, 0, eol);
       continue;
     }
     emit(&events, E_CONTENT, 0);
@@ -543,17 +795,27 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
       continue;
     bool flow_ending;
     if (leaf_flags & LEAF_ABSORBING)
-      flow_ending = info->closed_line == line;
+      /* An unclosed concrete block ends before this line ending when the next
+       * line is lazy (`nonLazyContinuation` fails); before a new container or
+       * the end of input it swallows the line ending. */
+      flow_ending = info->closed_line == line ||
+                    (info->closed_line < 0 && info->last_line == line &&
+                     (size_t)line + 1 < line_count && !lines[line + 1].opens_container);
     else
       flow_ending = info->last_content_line == line;
-    emit(&events, flow_ending ? E_LINE_ENDING : E_CONTENT, 0);
+    if (flow_ending)
+      emit_at(&events, E_LINE_ENDING, 0, eol);
+    else
+      emit(&events, E_CONTENT, 0);
   }
 
   int *spread = NULL;
+  ls_point *ends = NULL;
   ls_ids *list_items = NULL;
   if (valid) {
     move_container_exits(&events);
     spread = (int *)mem->calloc((size_t)ids, sizeof(int));
+    ends = (ls_point *)mem->calloc((size_t)ids, sizeof(ls_point));
     list_items = (ls_ids *)mem->calloc((size_t)ids, sizeof(ls_ids));
     /* Lists are prepared in exit order, inner lists first, as in `compile`. */
     size_t *stack = (size_t *)mem->calloc(events.count + 1, sizeof(size_t));
@@ -571,13 +833,15 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
           break;
         }
         depth--;
+        /* Container token end after micromark-util-subtokenize. */
+        ends[events.items[index].id] = events.items[index].point;
         if (type == E_LIST_EXIT) {
           ls_ids *ids_for_list = &list_items[events.items[index].id];
           if (ids_for_list->count) {
             valid = false; /* a list must be prepared once */
             break;
           }
-          prepare_list(&events, stack[depth], index, spread, ids_for_list, mem);
+          prepare_list(&events, stack[depth], index, spread, ends, ids_for_list, mem);
         }
       }
     }
@@ -593,10 +857,28 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
     aimarkdown_cmark_event_type event;
     while ((event = aimarkdown_cmark_iter_next(iter)) != AIMARKDOWN_CMARK_EVENT_DONE) {
       aimarkdown_cmark_node *node = aimarkdown_cmark_iter_get_node(iter);
-      if (event != AIMARKDOWN_CMARK_EVENT_ENTER || node->type != AIMARKDOWN_CMARK_NODE_LIST)
+      if (event != AIMARKDOWN_CMARK_EVENT_ENTER)
         continue;
       int id = node->list_spread_id;
-      if (id <= 0 || id >= ids || !spread[id])
+      if (id <= 0 || id >= ids)
+        continue;
+      if (positions && node->type == AIMARKDOWN_CMARK_NODE_CODE_BLOCK) {
+        set_code_position(node, &leaves[id], lines, line_count, eof);
+        continue;
+      }
+      if (positions && node->type == AIMARKDOWN_CMARK_NODE_HTML_BLOCK) {
+        set_html_position(node, &leaves[id], lines, line_count, eof);
+        continue;
+      }
+      if (positions && (node->type == AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE ||
+                        node->type == AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION)) {
+        if (ends[id].line > 0 && ends[id].column > 0) {
+          aimarkdown_cmark_web_position_set_start(node, node->start_line, node->start_column);
+          set_web_end(node, ends[id]);
+        }
+        continue;
+      }
+      if (node->type != AIMARKDOWN_CMARK_NODE_LIST || !spread[id])
         continue;
       ls_ids *found = &list_items[id];
       size_t index = 0;
@@ -610,9 +892,24 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
       }
       if (!matches || index != found->count)
         continue;
-      node->list_spread = spread[id];
-      for (aimarkdown_cmark_node *child = node->first_child; child; child = child->next)
-        child->list_spread = spread[child->list_spread_id];
+      if (spreads) {
+        node->list_spread = spread[id];
+        for (aimarkdown_cmark_node *child = node->first_child; child; child = child->next)
+          child->list_spread = spread[child->list_spread_id];
+      }
+      if (positions) {
+        if (ends[id].line > 0 && ends[id].column > 0) {
+          aimarkdown_cmark_web_position_set_start(node, node->start_line, node->start_column);
+          set_web_end(node, ends[id]);
+        }
+        for (aimarkdown_cmark_node *child = node->first_child; child; child = child->next) {
+          ls_point item_end = ends[child->list_spread_id];
+          if (item_end.line > 0 && item_end.column > 0) {
+            aimarkdown_cmark_web_position_set_start(child, child->start_line, child->start_column);
+            set_web_end(child, item_end);
+          }
+        }
+      }
     }
     aimarkdown_cmark_iter_free(iter);
   }
@@ -623,7 +920,9 @@ void aimarkdown_cmark_list_spread_finish(aimarkdown_cmark_parser *parser, aimark
     mem->free(list_items);
   }
   mem->free(spread);
+  mem->free(ends);
   mem->free(events.items);
+  mem->free(lines);
   mem->free(leaves);
   aimarkdown_cmark_list_spread_free(parser);
 }

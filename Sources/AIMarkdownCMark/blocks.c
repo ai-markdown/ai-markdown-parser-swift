@@ -258,7 +258,7 @@ static void add_line(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk *ch, ai
       aimarkdown_cmark_strbuf_putc(&node->content, ' ');
     }
   }
-  if ((parser->options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_CODE_METADATA | AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA)) &&
+  if ((parser->options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_CODE_METADATA | AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA | AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)) &&
       (node->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH || node->type == AIMARKDOWN_CMARK_NODE_HEADING)) {
     if (node->math_line_count == node->math_line_capacity) {
       node->math_line_capacity = node->math_line_capacity ? node->math_line_capacity * 2 : 8;
@@ -1244,12 +1244,15 @@ static bool parse_code_block_prefix(aimarkdown_cmark_parser *parser, aimarkdown_
                                     bool *should_continue) {
   bool res = false;
 
+  aimarkdown_cmark_list_spread_leaf_prefix(parser, container);
   if (!container->as.code.fenced) { // indented
     if (parser->indent >= CODE_INDENT) {
+      aimarkdown_cmark_list_spread_indent(parser, container, true);
       if (container->code_metadata) container->code_metadata->indented_qualified = true;
       S_advance_offset(parser, input, CODE_INDENT, true);
       res = true;
     } else if (parser->blank) {
+      aimarkdown_cmark_list_spread_indent(parser, container, false);
       if (container->code_metadata) container->code_metadata->indented_qualified = false;
       S_advance_offset(parser, input, parser->first_nonspace - parser->offset,
                        false);
@@ -1430,6 +1433,7 @@ static aimarkdown_cmark_node *check_open_blocks(aimarkdown_cmark_parser *parser,
       // a heading can never contain more than one line
       goto done;
     case AIMARKDOWN_CMARK_NODE_HTML_BLOCK:
+      aimarkdown_cmark_list_spread_leaf_prefix(parser, container);
       if (!parse_html_block_prefix(parser, container))
         goto done;
       break;
@@ -1476,6 +1480,17 @@ done:
   }
 
   return container;
+}
+
+/* Web atxHeading and setextHeading tokens end at the physical end of their last
+ * line, including trailing whitespace and closing sequences. */
+static void S_web_heading_end(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *heading, aimarkdown_cmark_chunk *input) {
+  if (!(parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS))
+    return;
+  bufsize_t end = input->len;
+  while (end > 0 && S_is_line_end_char(input->data[end - 1]))
+    end--;
+  aimarkdown_cmark_web_position_set_end(heading, parser->line_number, end + 1);
 }
 
 static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node **container,
@@ -1536,6 +1551,10 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       (*container)->as.heading.setext = false;
       (*container)->internal_offset = matched;
       aimarkdown_cmark_list_spread_leaf(parser, *container, false);
+      if (parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) {
+        aimarkdown_cmark_web_position_set_start(*container, parser->line_number, heading_startpos + 1);
+        S_web_heading_end(parser, *container, input);
+      }
 
     } else if (!indented && (parser->options & AIMARKDOWN_CMARK_OPT_MATH) &&
                (matched = math_fence(input, parser->first_nonspace, false))) {
@@ -1572,9 +1591,13 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
                              (cont_type != AIMARKDOWN_CMARK_NODE_PARAGRAPH &&
                               (matched = scan_html_block_start_7(
                                    input, parser->first_nonspace))))) {
+      int web_html_start = parser->partially_consumed_tab ? 0 : parser->offset + 1;
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_HTML_BLOCK,
                              parser->first_nonspace + 1);
       (*container)->as.html_block_type = matched;
+      /* Web htmlFlow includes the indentation after container prefixes. */
+      if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) && web_html_start)
+        aimarkdown_cmark_web_position_set_start(*container, parser->line_number, web_html_start);
       // note, we don't adjust parser->offset because the tag is part of the
       // text
     } else if (!indented && cont_type == AIMARKDOWN_CMARK_NODE_PARAGRAPH &&
@@ -1589,6 +1612,13 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
         (*container)->as.heading.level = lev;
         (*container)->as.heading.setext = true;
         aimarkdown_cmark_list_spread_leaf(parser, *container, false);
+        /* Starts where the first remaining content line starts. */
+        if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) && (*container)->math_line_count &&
+            (*container)->math_lines[0].offset == 0) {
+          aimarkdown_cmark_web_position_set_start(*container, (*container)->math_lines[0].line,
+                                       (*container)->math_lines[0].column);
+          S_web_heading_end(parser, *container, input);
+        }
         S_advance_offset(parser, input, input->len - 1 - parser->offset, false);
       }
     } else if (!indented &&
@@ -1648,6 +1678,17 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       }
 
       i = parser->column - save_column;
+      /* micromark's listItemPrefix ends after the marker when the rest of the
+       * line is blank, after one whitespace for five or more columns, and
+       * after all whitespace otherwise; tabs leave the point unknown. */
+      int web_prefix_end = 0;
+      bool web_blank_after_marker = i < 1 || S_is_line_end_char(peek_at(input, parser->offset));
+      bool web_prefix_tab = save_partially_consumed_tab;
+      for (bufsize_t k = save_offset; k < parser->offset; k++)
+        if (peek_at(input, k) == '\t') web_prefix_tab = true;
+      if (!web_prefix_tab)
+        web_prefix_end = web_blank_after_marker ? save_offset + 1
+                         : i >= 5 ? save_offset + 2 : parser->offset + 1;
       if (i >= 5 || i < 1 ||
           // only spaces after list marker:
           S_is_line_end_char(peek_at(input, parser->offset))) {
@@ -1680,13 +1721,18 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_ITEM,
                              parser->first_nonspace + 1);
       aimarkdown_cmark_list_spread_open(parser, *container);
+      aimarkdown_cmark_list_spread_item_prefix(parser, *container, web_prefix_end);
       /* TODO: static */
       memcpy(&((*container)->as.list), data, sizeof(*data));
       parser->mem->free(data);
     } else if (indented && !maybe_lazy && !parser->blank) {
+      /* Web codeIndented includes its indentation after container prefixes. */
+      int web_code_start = parser->partially_consumed_tab ? 0 : parser->offset + 1;
       S_advance_offset(parser, input, CODE_INDENT, true);
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_CODE_BLOCK,
                              parser->offset + 1);
+      if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) && web_code_start)
+        aimarkdown_cmark_web_position_set_start(*container, parser->line_number, web_code_start);
       (*container)->definition.single_line = parser->definition_lazy_code;
       (*container)->as.code.fenced = false;
       if (parser->options & AIMARKDOWN_CMARK_OPT_CODE_METADATA) { aimarkdown_cmark_code_metadata_start(*container, 2); (*container)->code_metadata->indented_qualified = true; }
@@ -2100,6 +2146,7 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
   aimarkdown_cmark_list_spread_line(parser);
 
   last_matched_container = check_open_blocks(parser, &input, &all_matched);
+  aimarkdown_cmark_list_spread_continued(parser, last_matched_container);
 
   if (!last_matched_container)
     goto finished;
@@ -2130,7 +2177,6 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
     parser->current = finalize(parser, parser->current);
   }
 finished:
-  aimarkdown_cmark_list_spread_end_line(parser, parser->math_last_line_ending);
   parser->last_line_length = input.len;
   if (parser->last_line_length &&
       input.data[parser->last_line_length - 1] == '\n')
@@ -2138,6 +2184,15 @@ finished:
   if (parser->last_line_length &&
       input.data[parser->last_line_length - 1] == '\r')
     parser->last_line_length -= 1;
+  {
+    /* The physical line, not `input`: ATX headings chop the chunk's length. */
+    bufsize_t physical = parser->curline.size;
+    if (physical && parser->curline.ptr[physical - 1] == '\n')
+      physical -= 1;
+    if (physical && parser->curline.ptr[physical - 1] == '\r')
+      physical -= 1;
+    aimarkdown_cmark_list_spread_end_line(parser, parser->math_last_line_ending, physical);
+  }
 
   if ((parser->options & AIMARKDOWN_CMARK_OPT_FOOTNOTES) &&
       (parser->options & AIMARKDOWN_CMARK_OPT_FOOTNOTES_LOSSLESS)) {

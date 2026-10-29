@@ -20,6 +20,13 @@ public protocol TableCellContainer: Markup, ExpressibleByArrayLiteral {
 // MARK: - Public API
 
 public extension TableCellContainer {
+    /// AIMarkdown: the number of cells the parser's row scan found, before cells beyond the
+    /// header's columns were dropped or missing cells were added.
+    ///
+    /// Captured only with ``ParseOptions/parseWebPositions``; `nil` otherwise, including for
+    /// programmatically created rows. It is parse evidence and is not recomputed after edits.
+    var parsedCellCount: Int? { _data.raw.markup.header.parsedTableCellCount }
+
     /// Create a row from one cell.
     ///
     /// - parameter cell: The one cell comprising the row.

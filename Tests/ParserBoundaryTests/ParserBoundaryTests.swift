@@ -97,6 +97,34 @@ final class ParserBoundaryTests: XCTestCase {
         XCTAssertTrue(kinds.contains("DefinitionList"))
     }
 
+    func testWebPositionsAreOptInParserEvidence() throws {
+        // Expected ranges are the Web mdast positions for these inputs (1-based lines, UTF-8 columns, exclusive end).
+        func location(_ line: Int, _ column: Int) -> SourceLocation { SourceLocation(line: line, column: column, source: nil) }
+        let input = "- ```\n  a\n- b\n\n| a |\n| - |\n| b | c |\n\nx  \ny"
+        let original = Document(parsing: input)
+        let captured = Document(parsing: input, options: [.parseWebPositions])
+        XCTAssertTrue(descendants(original).allSatisfy { $0.parsedWebRange == nil })
+        XCTAssertEqual(descendants(original).map(\.range), descendants(captured).map(\.range))
+        XCTAssertEqual(original.format(), captured.format())
+
+        let items = descendants(captured).compactMap { $0 as? ListItem }
+        // The unclosed fence swallows its line ending, so the item ends after the next item's prefix.
+        XCTAssertEqual(items.first?.parsedWebRange, location(1, 1)..<location(3, 3))
+        XCTAssertEqual(descendants(captured).first { $0 is CodeBlock }?.parsedWebRange, location(1, 3)..<location(3, 1))
+        let rows = descendants(captured).compactMap { $0 as? Table.Row }
+        XCTAssertEqual(rows.first?.parsedCellCount, 2)
+        XCTAssertEqual(rows.first?.childCount, 1)
+        XCTAssertEqual(rows.first?.child(at: 0)?.parsedWebRange, location(7, 1)..<location(7, 5))
+        let lineBreak = descendants(captured).first { $0 is LineBreak }
+        XCTAssertEqual(lineBreak?.parsedWebRange, location(9, 2)..<location(10, 1))
+
+        XCTAssertNil(ListItem(Paragraph(Text("x"))).parsedWebRange)
+        XCTAssertNil(Table.Row([Table.Cell(Text("x"))]).parsedCellCount)
+        var item = try XCTUnwrap(items.first)
+        item.checkbox = .checked
+        XCTAssertNil(item.parsedWebRange)
+    }
+
     func testCNodeTypeRewriteClearsEvidence() throws {
         let parser = try XCTUnwrap(aimarkdown_cmark_parser_new(Int32(AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA)))
         defer { aimarkdown_cmark_parser_free(parser) }
