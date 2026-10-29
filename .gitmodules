@@ -1,0 +1,6 @@
+[submodule "upstream/swift-markdown"]
+	path = upstream/swift-markdown
+	url = git@github.com:ai-markdown/swift-markdown.git
+[submodule "upstream/swift-cmark"]
+	path = upstream/swift-cmark
+	url = git@github.com:ai-markdown/swift-cmark.git
