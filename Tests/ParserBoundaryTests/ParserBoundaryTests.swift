@@ -3,6 +3,34 @@ import AIMarkdownCMark
 import XCTest
 
 final class ParserBoundaryTests: XCTestCase {
+    func testMathContainerBoundaryValuesAcrossPackageBoundary() throws {
+        // Pinned Web e9ec1799fdc380d99ce0a6313023515895bbd7bf regressions.
+        // A container's flow boundary excludes one EOL; it is not trimEnd.
+        let cases = [
+            ("- Item\n\n  $$\n  x\n\nAfter", "x"),
+            ("- Item\n\n  $$\n  x\n\n\nAfter", "x\n"),
+            ("- Item\n\n  $$\n  x  \n  \nAfter", "x  "),
+            ("- Item\n\n  $$\n  x\n  \t \nAfter", "x\n\t "),
+            ("- Item\n\n  $$\n  x\n\n", "x\n"),
+            ("- Item\n\n  $$\n  x\n\n  $$\nAfter", "x\n"),
+            ("- Item\n\n  $$\n  x\n\n- Next", "x\n"),
+            ("- Item\n\n  $$\n  x\n\n> After", "x\n"),
+            ("> $$\n> x\n>\nAfter", "x"),
+            ("$$\nx\n\n", "x\n"),
+        ]
+        for eol in ["\n", "\r\n", "\r"] {
+            for (raw, value) in cases {
+                let source = raw.replacingOccurrences(of: "\n", with: eol)
+                let expected = value.replacingOccurrences(of: "\n", with: eol)
+                let document = Document(parsing: source, options: [.parseMath])
+                let math = try XCTUnwrap(descendants(document).compactMap { $0 as? MathBlock }.first)
+                XCTAssertEqual(math.value, expected, source.debugDescription)
+                XCTAssertNotNil(math.range)
+                XCTAssertTrue(descendants(Document(parsing: source)).allSatisfy { !($0 is MathBlock) })
+            }
+        }
+    }
+
     private func descendants(_ root: any Markup) -> [any Markup] {
         var result: [any Markup] = [], stack: [any Markup] = [root]
         while let node = stack.popLast() {

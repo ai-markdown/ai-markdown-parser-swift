@@ -9,7 +9,7 @@
     },
     "swift-cmark": {
       "url": "https://github.com/ai-markdown/swift-cmark.git",
-      "revision": "ee2c072d1f016e62282be56d9c77a49c20f10ff1"
+      "revision": "9b592710fefa06357665d79136b2283929c9912f"
     }
   },
   "licenseHashes": {
@@ -506,7 +506,7 @@
     "AIMarkdownCAtomic/include/module.modulemap": "60346f8e0c04d04b3b56d7ba2c5ea1565f59a9a148d7c9a935089c928932435b",
     "AIMarkdownCMark/aimarkdown-string_token.h": "6a5a0af2b04bbd43dc0b8688a7cb5fbaf3ca76a5ec5137b0428be1f2f0fed9bc",
     "AIMarkdownCMark/arena.c": "d839c45e37be026104dc2a85819c318a02bbb42ce5398c598bb5467f175e7821",
-    "AIMarkdownCMark/blocks.c": "91be21588ccd1ec78dbdb6b17a18c9fbfa725b853358759eaffc2281d02514f3",
+    "AIMarkdownCMark/blocks.c": "8f12d7dc737776ed3f2ac0131daed61f54361e7ecf34507dec6e812f0fc5cab8",
     "AIMarkdownCMark/buffer.c": "91d47dcd3e554d52b506b3d7a715fc2072d37fcc650c3b847f8a67b459b3a144",
     "AIMarkdownCMark/case_fold_switch.inc": "74ad2a7f750015e43318d68e4dde0fe3b619d5bf976ef5f80f666796326319ea",
     "AIMarkdownCMark/cmark.c": "abc9fea441ab3844c8c3728f441b94f0582cadb483ce1935144093aabc010ef8",
