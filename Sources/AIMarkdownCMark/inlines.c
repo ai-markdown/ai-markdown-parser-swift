@@ -2159,7 +2159,8 @@ static int parse_inline(aimarkdown_cmark_parser *parser, subject *subj, aimarkdo
 
 // Parse the actual GFM task marker on a complete first paragraph. This avoids
 // promoting checkbox body text to a definition and handles byte-feed EOF safely.
-static bool web_task_marker(subject *subj, aimarkdown_cmark_node *parent, bufsize_t *body) {
+static bool web_task_marker(subject *subj, aimarkdown_cmark_node *parent, bufsize_t *body,
+                            bufsize_t *continuation, int options) {
   aimarkdown_cmark_node *item = parent->parent;
   if (parent->type != AIMARKDOWN_CMARK_NODE_PARAGRAPH || !item || item->type != AIMARKDOWN_CMARK_NODE_ITEM ||
       item->first_child != parent || !item->task_extension || subj->input.len < 4 || subj->input.data[0] != '[') return false;
@@ -2179,6 +2180,26 @@ static bool web_task_marker(subject *subj, aimarkdown_cmark_node *parent, bufsiz
   item->task_content_line = parent->start_line;
   parent->definition.no_reference = true;
   subj->pos = 4;
+  /* The task callback slices one character from the initial mdast text. A
+   * marker-only soft line therefore loses LF/CR, but CRLF retains its LF.
+   * Preserve hard-break suffixes: they are not text and are never sliced. */
+  if (options & (AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES)) {
+    bufsize_t end = 3;
+    bool tab = false;
+    while (end < subj->input.len && (data[end] == ' ' || data[end] == '\t')) {
+      if (data[end] == '\t') tab = true;
+      end++;
+    }
+    if (end < subj->input.len && S_is_line_end_char(data[end])) {
+      if (end <= 4 || tab) {
+        *continuation = end;
+        subj->pos = end + 1;
+        skip_spaces(subj);
+      } else {
+        subj->pos = end;
+      }
+    }
+  }
   int line = subj->line, column = subj->block_offset + 5;
   math_source_point(subj, subj->pos, &line, &column);
   subj->line = line;
@@ -2240,7 +2261,8 @@ void aimarkdown_cmark_parse_inlines(aimarkdown_cmark_parser *parser,
     aimarkdown_cmark_chunk_rtrim(&subj.input);
 
   bufsize_t task_body = 0;
-  bool task = web_task_marker(&subj, parent, &task_body);
+  bufsize_t task_continuation = -1;
+  bool task = web_task_marker(&subj, parent, &task_body, &task_continuation, options);
 
   while (!is_eof(&subj) && parse_inline(parser, &subj, parent, options))
     ;
@@ -2253,6 +2275,31 @@ void aimarkdown_cmark_parse_inlines(aimarkdown_cmark_parser *parser,
   }
   if (options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)
     web_inline_positions(&subj, parent);
+  if (task_continuation >= 0) {
+    const aimarkdown_cmark_math_line *row = math_line_at(&subj, task_continuation);
+    if (row && row->ending == 0x0d0a) {
+      aimarkdown_cmark_node *residual = make_softbreak(subj.mem);
+      if (options & AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA) residual->softbreak_ending = 10;
+      residual->start_line = row->line;
+      residual->start_column = row->column + task_continuation - row->offset + 1;
+      residual->end_line = row->line + 1;
+      residual->end_column = 0;
+      aimarkdown_cmark_node_prepend_child(parent, residual);
+      if (options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) {
+        aimarkdown_cmark_web_position_set_start(residual, residual->start_line, residual->start_column);
+        aimarkdown_cmark_web_position_set_end(residual, row->line + 1, 1);
+      }
+    }
+    aimarkdown_cmark_node *head = parent->first_child;
+    if (row && head && (head->type == AIMARKDOWN_CMARK_NODE_TEXT || head->type == AIMARKDOWN_CMARK_NODE_SOFTBREAK)) {
+      int column = row->column + task_continuation - row->offset + 1;
+      if (options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) {
+        aimarkdown_cmark_web_position_set_start(parent, row->line, column);
+        aimarkdown_cmark_web_position_set_end(parent, parent->end_line, parent->end_column + 1);
+        aimarkdown_cmark_web_position_set_start(head, row->line, column);
+      }
+    }
+  }
   // free bracket and delim stack
   while (subj.last_delim) {
     remove_delimiter(&subj, subj.last_delim);

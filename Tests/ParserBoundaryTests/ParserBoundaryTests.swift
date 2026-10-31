@@ -31,6 +31,42 @@ final class ParserBoundaryTests: XCTestCase {
         }
     }
 
+    func testTaskCallbackRetainsRawLineEndingRemainderAndEventCoordinates() throws {
+        for eol in ["\n", "\r\n", "\r"] {
+            let document = Document(parsing: "- [x]\(eol)next", options: [.parseWebCharacterReferences, .parseWebPositions, .parseSoftBreakMetadata])
+            let paragraph = try XCTUnwrap(descendants(document).compactMap { $0 as? Paragraph }.first)
+            XCTAssertEqual(paragraph.parsedWebRange?.lowerBound.line, 1)
+            XCTAssertEqual(paragraph.parsedWebRange?.lowerBound.column, 7)
+            XCTAssertEqual(paragraph.childCount, eol == "\r\n" ? 2 : 1)
+            if eol == "\r\n" {
+                let residual = try XCTUnwrap(paragraph.child(at: 0) as? SoftBreak)
+                XCTAssertEqual(residual.physicalLineEnding, "\n")
+                XCTAssertEqual(residual.parsedWebRange?.lowerBound.line, 1)
+                XCTAssertEqual(residual.parsedWebRange?.lowerBound.column, 7)
+                XCTAssertEqual(residual.parsedWebRange?.upperBound.line, 2)
+                XCTAssertEqual(residual.parsedWebRange?.upperBound.column, 1)
+            }
+            XCTAssertEqual(descendants(document).compactMap { $0 as? Text }.first?.string, "next")
+            let uncaptured = Document(parsing: "- [x]\(eol)next", options: [.parseWebCharacterReferences])
+            XCTAssertTrue(descendants(uncaptured).compactMap { $0 as? SoftBreak }.allSatisfy { $0.physicalLineEnding == nil })
+        }
+    }
+
+    func testListCodeBoundaryUsesFollowingContainerEvent() throws {
+        let cases = [
+            ("After", "code"), ("# After", "code"),
+            ("- next", "code\n"), ("1. next", "code\n"), ("> next", "code\n"),
+        ]
+        for eol in ["\n", "\r\n", "\r"] {
+            for (suffix, value) in cases {
+                let source = ("- item\n\n  ```\n  code\n\n" + suffix).replacingOccurrences(of: "\n", with: eol)
+                let parsed = Document(parsing: source, options: [.parseCodeMetadata, .parseWebPositions])
+                let code = try XCTUnwrap(descendants(parsed).compactMap { $0 as? CodeBlock }.first)
+                XCTAssertEqual(code.codeMetadata?.value, value.replacingOccurrences(of: "\n", with: eol))
+            }
+        }
+    }
+
     private func descendants(_ root: any Markup) -> [any Markup] {
         var result: [any Markup] = [], stack: [any Markup] = [root]
         while let node = stack.popLast() {

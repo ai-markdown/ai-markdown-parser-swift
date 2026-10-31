@@ -89,7 +89,7 @@ typedef struct {
   aimarkdown_cmark_strbuf source, compiled, pending;
   aimarkdown_cmark_chunk info, value, lang, meta;
   int kind;
-  bool finished, indented_qualified, closed, boundary_trim;
+  bool finished, indented_qualified, closed, boundary_trim, list_boundary;
 } aimarkdown_cmark_code_metadata;
 
 struct aimarkdown_cmark_node {

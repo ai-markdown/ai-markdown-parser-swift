@@ -258,7 +258,7 @@ static void add_line(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk *ch, ai
       aimarkdown_cmark_strbuf_putc(&node->content, ' ');
     }
   }
-  if ((parser->options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_CODE_METADATA | AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA | AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)) &&
+  if ((parser->options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES | AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_CODE_METADATA | AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA | AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)) &&
       (node->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH || node->type == AIMARKDOWN_CMARK_NODE_HEADING)) {
     if (node->math_line_count == node->math_line_capacity) {
       node->math_line_capacity = node->math_line_capacity ? node->math_line_capacity * 2 : 8;
@@ -576,6 +576,21 @@ static aimarkdown_cmark_node *finalize(aimarkdown_cmark_parser *parser, aimarkdo
   }
 
   case AIMARKDOWN_CMARK_NODE_CODE_BLOCK:
+    if (b->code_metadata && b->code_metadata->list_boundary) {
+      bool container_prefix = false;
+      /* New document containers contribute the boundary EOL to codeFlow;
+       * ordinary flow exits before it. The successor AST is now available. */
+      for (aimarkdown_cmark_node *owner = b->parent; owner; owner = owner->parent) {
+        aimarkdown_cmark_node *next = owner->next;
+        if (next && next->start_line == parser->line_number &&
+            (next->type == AIMARKDOWN_CMARK_NODE_ITEM || next->type == AIMARKDOWN_CMARK_NODE_LIST ||
+             next->type == AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE)) {
+          container_prefix = true;
+          break;
+        }
+      }
+      if (!container_prefix) b->code_metadata->boundary_trim = true;
+    }
     aimarkdown_cmark_code_metadata_finish(b);
     if (!b->as.code.fenced) { // indented code
       remove_trailing_blank_lines(node_content);
@@ -1445,8 +1460,17 @@ static aimarkdown_cmark_node *check_open_blocks(aimarkdown_cmark_parser *parser,
       }
       break;
     case AIMARKDOWN_CMARK_NODE_ITEM:
-      if (!parse_node_item_prefix(parser, input, container))
+      if (!parse_node_item_prefix(parser, input, container)) {
+        /* A list flow boundary excludes its final line ending, just like the
+         * footnote container boundary. EOF and explicit fences do not enter
+         * this branch, so their trailing blank code lines remain intact. */
+        if (parser->options & AIMARKDOWN_CMARK_OPT_CODE_METADATA) {
+          for (aimarkdown_cmark_node *open = parser->current; open && open != container; open = open->parent)
+            if (open->code_metadata && open->code_metadata->kind == 1)
+              open->code_metadata->list_boundary = true;
+        }
         goto done;
+      }
       break;
     case AIMARKDOWN_CMARK_NODE_MATH_BLOCK:
       if (!parse_math_prefix(parser, input, container, &should_continue)) goto done;
