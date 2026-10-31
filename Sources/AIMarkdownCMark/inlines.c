@@ -607,12 +607,19 @@ static const aimarkdown_cmark_math_line *math_line_at(subject *subj, bufsize_t o
     if (parent->math_lines[mid].offset <= offset) lo = mid + 1;
     else hi = mid;
   }
-  return lo ? &parent->math_lines[lo - 1] : NULL;
+  if (lo) return &parent->math_lines[lo - 1];
+  const aimarkdown_cmark_math_line *first = &parent->math_lines[0];
+  return first->virtual_prefix > 0 && offset >= first->offset - first->virtual_prefix ? first : NULL;
+}
+
+/* A partial tab's virtual spaces occupy no additional physical bytes. */
+static int math_line_column(const aimarkdown_cmark_math_line *row, bufsize_t offset) {
+  return row->column + (offset > row->offset ? offset - row->offset : 0);
 }
 
 static void math_source_point(subject *subj, bufsize_t offset, int *line, int *column) {
   const aimarkdown_cmark_math_line *row = math_line_at(subj, offset);
-  if (row) { *line = row->line; *column = row->column + offset - row->offset; }
+  if (row) { *line = row->line; *column = math_line_column(row, offset); }
 }
 
 static aimarkdown_cmark_node *handle_math(subject *subj, int options) {
@@ -2289,11 +2296,11 @@ static void web_inline_positions(subject *subj, aimarkdown_cmark_node *parent) {
       if (flags & AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT_EOL)
         aimarkdown_cmark_web_position_set_end(node, last->line + 1, 1);
       else
-        aimarkdown_cmark_web_position_set_end(node, last->line, last->column + (end - 1 - last->offset) + 1);
+        aimarkdown_cmark_web_position_set_end(node, last->line, math_line_column(last, end));
     } else {
-      aimarkdown_cmark_web_position_set_end(node, first->line, first->column + start - first->offset);
+      aimarkdown_cmark_web_position_set_end(node, first->line, math_line_column(first, start));
     }
-    aimarkdown_cmark_web_position_set_start(node, first->line, first->column + start - first->offset);
+    aimarkdown_cmark_web_position_set_start(node, first->line, math_line_column(first, start));
   }
   aimarkdown_cmark_iter_free(iter);
 }

@@ -315,7 +315,7 @@ static bool validate_protocol(const char protocol[], uint8_t *data, size_t rewin
     return true;
   }
 
-  char prev_char = data[-((ptrdiff_t)rewind) - len - 1];
+  char prev_char = data[-((ptrdiff_t)rewind) - (ptrdiff_t)len - 1];
 
   // Make sure the character before the protocol is non-alphanumeric
   return !aimarkdown_cmark_isalnum(prev_char);

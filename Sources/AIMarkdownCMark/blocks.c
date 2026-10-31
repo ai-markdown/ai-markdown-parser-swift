@@ -295,6 +295,7 @@ static void add_line(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk *ch, ai
     line->line = parser->line_number;
     line->column = parser->offset + 1;
     line->ending = parser->math_current_ending;
+    line->virtual_prefix = parser->partially_consumed_tab ? chars_to_tab : 0;
     int prefix = parser->math_inline_prefix;
     line->visual_column = aimarkdown_cmark_reference_column(1, ch->data, parser->offset);
     line->prefix_visual_column = aimarkdown_cmark_reference_column(1, ch->data, parser->offset - prefix);
@@ -574,6 +575,11 @@ static aimarkdown_cmark_node *finalize(aimarkdown_cmark_parser *parser, aimarkdo
   }
 
   case AIMARKDOWN_CMARK_NODE_MATH_BLOCK: {
+    if (parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) {
+      /* The flow exit above has consumed the actual closing fence, enclosing
+       * container boundary or physical EOF event, independently of value trim. */
+      aimarkdown_cmark_web_position_set_end(b, b->end_line, b->end_column + 1);
+    }
     // First content line is the meta string. Keep trailing spaces: unlike code info,
     // math meta is not trimmed by mdast-util-math.
     for (pos = 0; pos < node_content->size && !S_is_line_end_char(node_content->ptr[pos]); pos++) {}
@@ -751,6 +757,59 @@ void aimarkdown_cmark_manage_extensions_special_characters(aimarkdown_cmark_pars
   }
 }
 
+/* A definition split may detach a physical line ending from inline parsing.
+ * Retain that event before moving its content rows to another term. */
+static void definition_record_break(aimarkdown_cmark_node *node, bool soft, bufsize_t start) {
+  if (!node->math_line_count) return;
+  const aimarkdown_cmark_math_line *row = &node->math_lines[node->math_line_count - 1];
+  if (soft) {
+    start = node->content.size;
+    while (start > row->offset && S_is_line_end_char(node->content.ptr[start - 1])) start--;
+    bufsize_t spaces = start;
+    while (spaces > row->offset && node->content.ptr[spaces - 1] == ' ') spaces--;
+    if (start - spaces >= 2 && (spaces == row->offset || node->content.ptr[spaces - 1] != '\t')) {
+      start = spaces;
+      soft = false;
+    } else {
+      bufsize_t slashes = start;
+      while (slashes > row->offset && node->content.ptr[slashes - 1] == '\\') slashes--;
+      if ((start - slashes) % 2) {
+        start--;
+        soft = false;
+        aimarkdown_cmark_strbuf_truncate(&node->content, start);
+      }
+    }
+  }
+  node->definition.hardbreak = true;
+  node->definition.softbreak = soft;
+  if (!row->ending || start < row->offset) return;
+  node->definition.break_line = row->line;
+  node->definition.break_column = row->column + start - row->offset;
+  node->definition.break_ending = row->ending;
+}
+
+static void web_paragraph_position(aimarkdown_cmark_node *node) {
+  /* Table conversion already captured the complete original paragraph event.
+   * Task callbacks have their own slice-one-character range rules. */
+  if ((node->web_position_flags & 3) == 3 ||
+      (node->parent && node->parent->task_extension &&
+       node->parent->extension == node->parent->task_extension)) return;
+  if (!node->math_line_count) return;
+  const aimarkdown_cmark_math_line *first = &node->math_lines[0];
+  const aimarkdown_cmark_math_line *last = &node->math_lines[node->math_line_count - 1];
+  aimarkdown_cmark_web_position_set_start(node, first->line, first->column);
+  if (node->definition.hardbreak && node->definition.break_line) {
+    /* Definition resolution detached the actual final line ending together
+     * with its flow exit, so this paragraph still includes that event. */
+    aimarkdown_cmark_web_position_set_end(node, node->definition.break_line + 1, 1);
+  } else {
+    bufsize_t end = node->content.size;
+    while (end > last->offset && S_is_line_end_char(node->content.ptr[end - 1])) end--;
+    if (end >= last->offset)
+      aimarkdown_cmark_web_position_set_end(node, last->line, last->column + end - last->offset);
+  }
+}
+
 // Walk through node and all children, recursively, parsing
 // string content into inline content where appropriate.
 static void process_inlines(aimarkdown_cmark_parser *parser,
@@ -766,10 +825,18 @@ static void process_inlines(aimarkdown_cmark_parser *parser,
     if (ev_type == AIMARKDOWN_CMARK_EVENT_ENTER) {
       if (contains_inlines(cur)) {
         aimarkdown_cmark_parse_inlines(parser, cur, refmap, options);
+        if ((options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) && cur->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH)
+          web_paragraph_position(cur);
         if (cur->definition.hardbreak) {
-          aimarkdown_cmark_node *linebreak = aimarkdown_cmark_node_new_with_mem(AIMARKDOWN_CMARK_NODE_LINEBREAK, parser->mem);
+          aimarkdown_cmark_node *linebreak = aimarkdown_cmark_node_new_with_mem(cur->definition.softbreak ? AIMARKDOWN_CMARK_NODE_SOFTBREAK : AIMARKDOWN_CMARK_NODE_LINEBREAK, parser->mem);
           linebreak->start_line = linebreak->end_line = cur->end_line;
           linebreak->start_column = linebreak->end_column = cur->end_column;
+          if (options & AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA)
+            linebreak->softbreak_ending = cur->definition.softbreak ? cur->definition.break_ending : 0;
+          if ((options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) && cur->definition.break_line) {
+            aimarkdown_cmark_web_position_set_start(linebreak, cur->definition.break_line, cur->definition.break_column);
+            aimarkdown_cmark_web_position_set_end(linebreak, cur->definition.break_line + 1, 1);
+          }
           aimarkdown_cmark_node_append_child(cur, linebreak);
         }
       }
@@ -1287,10 +1354,12 @@ static bool parse_block_quote_prefix(aimarkdown_cmark_parser *parser, aimarkdown
 
 static bool parse_footnote_definition_block_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_chunk *input,
                                                    aimarkdown_cmark_node *container) {
-  /* GFM footnote blankLine is a non-consuming continuation. For an open
-   * math leaf its whitespace remains math data, even below four columns.
-   * Other leaves keep their existing prefix and metadata behavior. */
-  if (parser->blank && parser->current->type == AIMARKDOWN_CMARK_NODE_MATH_BLOCK) return true;
+  /* GFM footnote blankLine is a non-consuming continuation, including CR
+   * and whitespace-only lines. Keep the upstream prefix behavior outside
+   * the lossless profile. Math already requires the same physical event. */
+  if (parser->blank && (((parser->options & AIMARKDOWN_CMARK_OPT_FOOTNOTES_LOSSLESS) &&
+                         (parser->options & AIMARKDOWN_CMARK_OPT_WEB_CODE_SYNTAX)) ||
+                        parser->current->type == AIMARKDOWN_CMARK_NODE_MATH_BLOCK)) return true;
   if (parser->indent >= 4) {
     if ((parser->options & AIMARKDOWN_CMARK_OPT_CODE_METADATA) && parser->blank && parser->code_footnote_blank_offset < 0) {
       parser->code_footnote_blank_offset = parser->offset;
@@ -1596,10 +1665,30 @@ static void S_web_heading_end(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
 }
 
 static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node **container,
-                            aimarkdown_cmark_chunk *input, bool all_matched) {
+                            aimarkdown_cmark_chunk *input, bool all_matched,
+                            aimarkdown_cmark_node **matched_container) {
   bool indented;
   aimarkdown_cmark_list *data = NULL;
   bool maybe_lazy = S_type(parser->current) == AIMARKDOWN_CMARK_NODE_PARAGRAPH;
+  bool web_paragraph_interrupt = (parser->options & AIMARKDOWN_CMARK_OPT_WEB_CODE_SYNTAX) && maybe_lazy && all_matched;
+  aimarkdown_cmark_node *initial_container = *container;
+  aimarkdown_cmark_node *initial_parent = parser->current->parent;
+  bool web_code_interrupt = (parser->options & AIMARKDOWN_CMARK_OPT_WEB_CODE_SYNTAX) &&
+      parser->current->type == AIMARKDOWN_CMARK_NODE_CODE_BLOCK && !parser->current->as.code.fenced;
+  bool web_html_interrupt = (parser->options & AIMARKDOWN_CMARK_OPT_WEB_HTML_BLOCKS) &&
+      ((maybe_lazy && all_matched) ||
+       (parser->current->type == AIMARKDOWN_CMARK_NODE_CODE_BLOCK && !parser->current->as.code.fenced && initial_parent == initial_container));
+  bool web_flow_boundary = false;
+  if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_CODE_SYNTAX) && !all_matched) {
+    aimarkdown_cmark_node *open = parser->current;
+    for (; open && open != initial_container; open = open->parent)
+      if (open->type == AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE || open->type == AIMARKDOWN_CMARK_NODE_ITEM ||
+          open->type == AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION || open->type == AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION)
+        web_flow_boundary = true;
+    if (!open) web_flow_boundary = false;
+  }
+  /* add_child may finalize and free a reference-only current paragraph.
+   * Retain flow facts before any block-opening mutation, not its pointer. */
   aimarkdown_cmark_node_type cont_type = S_type(*container);
   bufsize_t matched = 0;
   int lev = 0;
@@ -1661,6 +1750,8 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
     } else if (!indented && (parser->options & AIMARKDOWN_CMARK_OPT_MATH) &&
                (matched = math_fence(input, parser->first_nonspace, false))) {
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_MATH_BLOCK, parser->first_nonspace + 1);
+      if (parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)
+        aimarkdown_cmark_web_position_set_start(*container, parser->line_number, parser->first_nonspace + 1);
       (*container)->math_fence_length = matched;
       (*container)->as.code.fenced = 1;
       (*container)->as.code.fence_offset = parser->first_nonspace - parser->offset;
@@ -1690,10 +1781,22 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
 
     } else if (!indented && ((matched = scan_html_block_start(
                                   input, parser->first_nonspace)) ||
-                             (cont_type != AIMARKDOWN_CMARK_NODE_PARAGRAPH &&
+                             ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_HTML_BLOCKS) &&
+                              peek_at(input, parser->first_nonspace) == '<' &&
+                              peek_at(input, parser->first_nonspace + 1) == '!' &&
+                              peek_at(input, parser->first_nonspace + 2) >= 'a' &&
+                              peek_at(input, parser->first_nonspace + 2) <= 'z' && (matched = 4)) ||
+                             (cont_type != AIMARKDOWN_CMARK_NODE_PARAGRAPH && !web_html_interrupt &&
                               (matched = scan_html_block_start_7(
                                    input, parser->first_nonspace))))) {
       int web_html_start = parser->partially_consumed_tab ? 0 : parser->offset + 1;
+      if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_HTML_BLOCKS) && matched == 7 && maybe_lazy &&
+          !all_matched && *container == initial_container && initial_parent && initial_parent != initial_container) {
+        /* A non-concrete HTML flow can start on a lazy line of the old
+         * document container. Its next prefix, not this line, exits it. */
+        *container = initial_parent;
+        *matched_container = initial_parent;
+      }
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_HTML_BLOCK,
                              parser->first_nonspace + 1);
       (*container)->as.html_block_type = matched;
@@ -1730,6 +1833,10 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
       // it's only now that we know the line is not part of a setext heading:
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_THEMATIC_BREAK,
                              parser->first_nonspace + 1);
+      if (parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) {
+        aimarkdown_cmark_web_position_set_start(*container, parser->line_number, parser->first_nonspace + 1);
+        S_web_heading_end(parser, *container, input);
+      }
       aimarkdown_cmark_list_spread_leaf(parser, *container, false);
       S_advance_offset(parser, input, input->len - 1 - parser->offset, false);
     } else if (!indented &&
@@ -1757,7 +1864,8 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
                depth < MAX_LIST_DEPTH &&
                (matched = parse_list_marker(
                     parser->mem, input, parser->first_nonspace,
-                    ((*container)->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH ||
+                    ((*container)->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH || web_paragraph_interrupt ||
+                     (web_code_interrupt && initial_parent == *container) ||
                      ((*container)->type == AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION &&
                       (*container)->start_line == parser->line_number && (*container)->definition.interrupt)), &data))) {
 
@@ -1830,6 +1938,8 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
     } else if (indented && !maybe_lazy && !parser->blank) {
       /* Web codeIndented includes its indentation after container prefixes. */
       int web_code_start = parser->partially_consumed_tab ? 0 : parser->offset + 1;
+      /* A newly opened container already starts an independent flow. */
+      bool one_line_flow = web_flow_boundary && *container == initial_container;
       S_advance_offset(parser, input, CODE_INDENT, true);
       *container = add_child(parser, *container, AIMARKDOWN_CMARK_NODE_CODE_BLOCK,
                              parser->offset + 1);
@@ -1837,6 +1947,7 @@ static void open_new_blocks(aimarkdown_cmark_parser *parser, aimarkdown_cmark_no
         aimarkdown_cmark_web_position_set_start(*container, parser->line_number, web_code_start);
       (*container)->definition.single_line = parser->definition_lazy_code;
       (*container)->as.code.fenced = false;
+      (*container)->as.code.web_single_line = one_line_flow;
       if (parser->options & AIMARKDOWN_CMARK_OPT_CODE_METADATA) { aimarkdown_cmark_code_metadata_start(*container, 2); (*container)->code_metadata->indented_qualified = true; }
       (*container)->as.code.fence_char = 0;
       (*container)->as.code.fence_length = 0;
@@ -2058,6 +2169,12 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
   if (parser->indent >= 4 || peek_at(input, parser->first_nonspace) != ':' ||
       !(S_is_space_or_tab(peek_at(input, parser->first_nonspace + 1)) ||
         S_is_line_end_char(peek_at(input, parser->first_nonspace + 1)))) return false;
+  /* These document containers do not admit definition terms. A colon below
+   * their prefix remains a lazy line of an unmatched nested list paragraph. */
+  aimarkdown_cmark_node *definition_scope = *matched;
+  if (definition_scope->type == AIMARKDOWN_CMARK_NODE_LIST) definition_scope = definition_scope->parent;
+  if (definition_scope && (definition_scope->type == AIMARKDOWN_CMARK_NODE_ITEM ||
+      definition_scope->type == AIMARKDOWN_CMARK_NODE_FOOTNOTE_DEFINITION)) return false;
   /* A document definition marker interrupts an unmatched container's lazy
    * flow even when that container cannot supply an external definition term. */
   parser->definition_marker_interrupt = true;
@@ -2085,7 +2202,7 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
         aimarkdown_cmark_strbuf_put(&term->content, old->content.ptr + lazy_offset, old->content.size - lazy_offset);
         definition_move_tail(parser, old, term, lazy_offset);
         aimarkdown_cmark_strbuf_truncate(&old->content, lazy_offset);
-        old->definition.hardbreak = true;
+        definition_record_break(old, true, 0);
         int final_line = old->definition.lazy_line - 1;
         while (parser->current != container) {
           aimarkdown_cmark_node *closing = parser->current;
@@ -2128,7 +2245,7 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
         aimarkdown_cmark_strbuf_put(&term->content, preceding->content.ptr + offset, preceding->content.size - offset);
         definition_move_tail(parser, preceding, term, offset);
         aimarkdown_cmark_strbuf_truncate(&preceding->content, offset);
-        preceding->definition.hardbreak = true;
+        definition_record_break(preceding, true, 0);
         if (preceding->flags & AIMARKDOWN_CMARK_NODE__OPEN) finalize(parser, preceding);
         preceding->end_line = term->start_line;
         preceding->end_column = 0;
@@ -2182,24 +2299,29 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
       item->end_line = line;
       item->end_column = item->start_column + end - start - 1;
       bufsize_t content_end = end;
+      bufsize_t break_start = end;
       bufsize_t after_ending = end;
       if (after_ending < term->content.size && term->content.ptr[after_ending] == '\r') after_ending++;
       if (after_ending < term->content.size && term->content.ptr[after_ending] == '\n') after_ending++;
       if (after_ending < term->content.size) {
         if (end - start >= 2 && term->content.ptr[end - 1] == ' ' && term->content.ptr[end - 2] == ' ') {
           item->definition.hardbreak = true;
+          while (break_start > start && term->content.ptr[break_start - 1] == ' ') break_start--;
+          if (break_start > start && term->content.ptr[break_start - 1] == '\t') item->definition.hardbreak = false;
         } else {
           int slashes = 0;
           while (content_end > start && term->content.ptr[content_end - 1] == '\\') { slashes++; content_end--; }
           content_end = end;
-          if (slashes % 2) { item->definition.hardbreak = true; content_end--; }
+          if (slashes % 2) { item->definition.hardbreak = true; content_end--; break_start = end - 1; }
         }
       }
       aimarkdown_cmark_strbuf_put(&item->content, term->content.ptr + start, content_end - start);
       while (term_line_index < term->math_line_count && term->math_lines[term_line_index].offset < start)
         term_line_index++;
-      if (term_line_index < term->math_line_count && term->math_lines[term_line_index].offset == start)
+      if (term_line_index < term->math_line_count && term->math_lines[term_line_index].offset < end)
         definition_copy_line(parser, item, &term->math_lines[term_line_index++], start);
+      if (item->definition.hardbreak)
+        definition_record_break(item, item->definition.softbreak, break_start - start);
       item->end_line = line + 1;
       item->end_column = 0;
       aimarkdown_cmark_list_spread_boundary(parser, item);
@@ -2212,6 +2334,9 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
     if (!omit_term) aimarkdown_cmark_node_free(term);
     parser->current = parent;
   }
+  /* The definition continuation clears lastBlankLine before attempting an
+   * indented prefix, even when that prefix falls back to a new description. */
+  if (parser->indent > 0 && !(previous_description && previous_description->definition.initial_blank)) spread = false;
   int initial_column = parser->column;
   S_advance_offset(parser, input, parser->first_nonspace + 1 - parser->offset, false);
   int after_marker_offset = parser->offset;
@@ -2323,7 +2448,7 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
 
   // Only open new blocks if we're not limited to inline
   if ((parser->options & AIMARKDOWN_CMARK_OPT_INLINE_ONLY) == 0)
-    open_new_blocks(parser, &container, &input, all_matched);
+    open_new_blocks(parser, &container, &input, all_matched, &last_matched_container);
 
   /* Web exits containers after this line's prefixes when input ends there. */
   aimarkdown_cmark_list_spread_prefix_only(parser, input.len - parser->offset <= 1);
@@ -2332,7 +2457,8 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
   if (current == parser->current)
   add_text_to_container(parser, container, last_matched_container, &input);
 
-  if (parser->current && parser->current->type == AIMARKDOWN_CMARK_NODE_CODE_BLOCK && parser->current->definition.single_line) {
+  if (parser->current && parser->current->type == AIMARKDOWN_CMARK_NODE_CODE_BLOCK &&
+      (parser->current->definition.single_line || parser->current->as.code.web_single_line)) {
     parser->current->end_line = parser->line_number + 1;
     parser->current = finalize(parser, parser->current);
   }

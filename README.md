@@ -57,6 +57,8 @@ For a coordinated update: commit implementation changes in the forks, stage the 
 
 Before release, ensure the referenced fork commits are available remotely, then publish the integration package version and update the main library's dependency. Do not edit generated output manually. Upstream synchronization does not automatically upgrade the main library.
 
+`ParseOptions.parseWebHTMLBlocks` explicitly enables Web declaration starts and lazy-container HTML block flow. Existing parser options keep their separate opt-in behavior: source-event positions do not enable syntax changes, and disabling Web code syntax retains the legacy footnote blank-prefix behavior. Package-boundary regressions check the new HTML option on/off and compare tracked/untracked ASTs and original ranges.
+
 ## Validation
 
 Run `swift test` and `swift test -c release` for the upstream and package-boundary suites. CI checks snapshot integrity, rebuilds from pinned forks, and runs both test configurations. `Tests/UpstreamMarkdownTests.manifest.json` records the upstream test revision and original/generated file hashes.

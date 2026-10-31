@@ -36,6 +36,7 @@ typedef struct {
   uint8_t fence_offset;
   unsigned char fence_char;
   int8_t fenced;
+  bool web_single_line; /* A new flow after an unmatched container closes this code chunk at EOL. */
 } aimarkdown_cmark_code;
 
 typedef struct {
@@ -72,6 +73,7 @@ typedef uint16_t aimarkdown_cmark_node_internal_flags;
 typedef struct {
   bufsize_t offset;
   int line, column, ending, visual_column, prefix_visual_column;
+  int virtual_prefix; /* Spaces emitted by the actually consumed partial tab before offset. */
   aimarkdown_cmark_chunk prefix;
 } aimarkdown_cmark_math_line;
 
@@ -136,6 +138,8 @@ struct aimarkdown_cmark_node {
     bool initial_blank;
     bool spread;
     bool hardbreak;
+    bool softbreak;
+    int break_line, break_column, break_ending;
     int lazy_offset;
     int lazy_line;
     int lazy_column;

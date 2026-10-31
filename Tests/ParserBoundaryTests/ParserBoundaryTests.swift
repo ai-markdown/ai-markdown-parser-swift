@@ -274,4 +274,62 @@ final class ParserBoundaryTests: XCTestCase {
         XCTAssertEqual(descendants(moved).first { $0 is BlockQuote }?.parsedWebRange, point(1, 1)..<point(2, 1))
         XCTAssertEqual(descendants(moved).compactMap { $0 as? Text }.last?.parsedWebRange, point(3, 3)..<point(3, 7))
     }
+
+    func testUnmatchedTildesAndMultilineDeleteCarryActualTokenPositions() throws {
+        func point(_ line: Int, _ column: Int) -> SourceLocation { SourceLocation(line: line, column: column, source: nil) }
+        for source in ["~", "~~"] {
+            let parsed = Document(parsing: source, options: [.parseWebEmphasis, .parseWebPositions])
+            let text = try XCTUnwrap(descendants(parsed).compactMap { $0 as? Text }.first)
+            XCTAssertEqual(text.string, source)
+            XCTAssertEqual(text.parsedWebRange, point(1, 1)..<point(1, source.utf8.count + 1))
+        }
+        let source = "> ~~a\r\n> b~~"
+        let parsed = Document(parsing: source, options: [.parseWebEmphasis, .parseWebPositions])
+        let node = try XCTUnwrap(descendants(parsed).first { $0 is Strikethrough })
+        XCTAssertEqual(node.parsedWebRange, point(1, 3)..<point(2, 6))
+        let legacy = Document(parsing: source, options: [.parseWebEmphasis])
+        XCTAssertTrue(descendants(legacy).allSatisfy { $0.parsedWebRange == nil })
+        XCTAssertEqual(descendants(parsed).map(\.range), descendants(legacy).map(\.range))
+    }
+
+    func testDefinitionSplitsRetainPhysicalBreakAndPartialTabEvents() throws {
+        func point(_ line: Int, _ column: Int) -> SourceLocation { SourceLocation(line: line, column: column, source: nil) }
+        let options: ParseOptions = [.parseDefinitionLists, .parseWebPositions, .parseSoftBreakMetadata]
+        let hard = Document(parsing: "First  \r\nSecond\r\n: description", options: options)
+        XCTAssertEqual(descendants(hard).first { $0 is LineBreak }?.parsedWebRange, point(1, 6)..<point(2, 1))
+        let source = "Term\r\n: value\r\n\tSecond\r\n\t: value"
+        let parsed = Document(parsing: source, options: options)
+        let soft = try XCTUnwrap(descendants(parsed).compactMap { $0 as? SoftBreak }.first)
+        XCTAssertEqual(soft.physicalLineEnding, "\r\n")
+        XCTAssertEqual(soft.parsedWebRange, point(2, 8)..<point(3, 1))
+        let term = try XCTUnwrap(descendants(parsed).compactMap { $0 as? Text }.first { $0.string == "  Second" })
+        XCTAssertEqual(term.parsedWebRange, point(3, 2)..<point(3, 8))
+    }
+
+    func testParagraphAndThematicBreakRetainPhysicalBlockEvents() throws {
+        func point(_ line: Int, _ column: Int) -> SourceLocation { SourceLocation(line: line, column: column, source: nil) }
+        let source = "> quote\nTerm\n: description\n\n  * * *  \n"
+        let parsed = Document(parsing: source, options: [.parseDefinitionLists, .parseWebPositions, .parseSoftBreakMetadata])
+        XCTAssertEqual(descendants(parsed).first { $0 is Paragraph }?.parsedWebRange, point(1, 3)..<point(2, 1))
+        XCTAssertEqual(descendants(parsed).first { $0 is ThematicBreak }?.parsedWebRange, point(5, 3)..<point(5, 10))
+    }
+
+    func testWebHTMLBlocksRetainLazyContainerAndRemainOptIn() throws {
+        func point(_ line: Int, _ column: Int) -> SourceLocation { SourceLocation(line: line, column: column, source: nil) }
+        let source = "[^f]: body\n<img>\ntext"
+        let parsed = Document(parsing: source, options: [.parseFootnotes, .parseWebHTMLBlocks, .parseWebPositions])
+        let html = try XCTUnwrap(descendants(parsed).compactMap { $0 as? HTMLBlock }.first)
+        XCTAssertTrue(html.parent is FootnoteDefinition)
+        XCTAssertEqual(html.rawHTML, "<img>\n")
+        XCTAssertEqual(html.parsedWebRange, point(2, 1)..<point(2, 6))
+        let untracked = Document(parsing: source, options: [.parseFootnotes, .parseWebHTMLBlocks])
+        XCTAssertEqual(parsed.debugDescription(options: [.printSourceLocations]), untracked.debugDescription(options: [.printSourceLocations]))
+        XCTAssertEqual(descendants(parsed).map(\.range), descendants(untracked).map(\.range))
+        XCTAssertTrue(descendants(untracked).allSatisfy { $0.parsedWebRange == nil })
+        let legacy = Document(parsing: source, options: [.parseFootnotes, .parseWebPositions])
+        XCTAssertTrue(descendants(legacy).compactMap { $0 as? HTMLBlock }.first?.parent is Document)
+        let declaration = Document(parsing: "text\n<!doctype html>\ntail", options: [.parseWebHTMLBlocks])
+        XCTAssertEqual(descendants(declaration).compactMap { $0 as? HTMLBlock }.count, 1)
+        XCTAssertEqual(descendants(Document(parsing: "text\n<!doctype html>\ntail")).compactMap { $0 as? HTMLBlock }.count, 0)
+    }
 }

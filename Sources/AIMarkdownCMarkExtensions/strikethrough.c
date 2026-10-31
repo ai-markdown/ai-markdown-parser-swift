@@ -7,19 +7,27 @@
 
 aimarkdown_cmark_node_type AIMARKDOWN_CMARK_NODE_STRIKETHROUGH;
 
+static void token_span(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *node, int start, int end) {
+  if (!(parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)) return;
+  node->web_subject_start = start;
+  node->web_subject_end = end;
+  node->web_position_flags = AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT;
+}
+
 static aimarkdown_cmark_node *match(aimarkdown_cmark_syntax_extension *self, aimarkdown_cmark_parser *parser,
                          aimarkdown_cmark_node *parent, unsigned char character,
                          aimarkdown_cmark_inline_parser *inline_parser) {
   aimarkdown_cmark_node *res = NULL;
   int left_flanking, right_flanking, punct_before, punct_after, delims;
   char buffer[101];
+  int start = aimarkdown_cmark_inline_parser_get_offset(inline_parser);
 
   if (character != '~')
     return NULL;
 
   if (parser->options & AIMARKDOWN_CMARK_OPT_WEB_EMPHASIS) {
     aimarkdown_cmark_chunk *input = aimarkdown_cmark_inline_parser_get_chunk(inline_parser);
-    int start = aimarkdown_cmark_inline_parser_get_offset(inline_parser), end = start;
+    int end = start;
     while (end < input->len && input->data[end] == '~') end++;
     // Web rejects the complete run when a third tilde is present: do not restart
     // at the final one/two markers after cmark's fixed scan buffer boundary.
@@ -32,6 +40,7 @@ static aimarkdown_cmark_node *match(aimarkdown_cmark_syntax_extension *self, aim
       res->start_line = res->end_line = aimarkdown_cmark_inline_parser_get_line(inline_parser);
       res->end_column = aimarkdown_cmark_inline_parser_get_column(inline_parser) - 1;
       res->start_column = res->end_column - (end - start) + 1;
+      token_span(parser, res, start, end);
       return res;
     }
   }
@@ -48,6 +57,7 @@ static aimarkdown_cmark_node *match(aimarkdown_cmark_syntax_extension *self, aim
   aimarkdown_cmark_node_set_literal(res, buffer);
   res->start_line = res->end_line = aimarkdown_cmark_inline_parser_get_line(inline_parser);
   res->start_column = aimarkdown_cmark_inline_parser_get_column(inline_parser) - delims;
+  token_span(parser, res, start, start + delims);
 
   if ((left_flanking || right_flanking) &&
       (delims == 2 || (!(parser->options & AIMARKDOWN_CMARK_OPT_STRIKETHROUGH_DOUBLE_TILDE) && delims == 1))) {
@@ -71,10 +81,15 @@ static delimiter *insert(aimarkdown_cmark_syntax_extension *self, aimarkdown_cma
   if (opener->inl_text->as.literal.len != closer->inl_text->as.literal.len)
     goto done;
 
+  bool positions = (opener->inl_text->web_position_flags & AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT) &&
+      (closer->inl_text->web_position_flags & AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT);
+  int start = opener->inl_text->web_subject_start;
+  int end = closer->inl_text->web_subject_end;
   if (!aimarkdown_cmark_node_set_type(strikethrough, AIMARKDOWN_CMARK_NODE_STRIKETHROUGH))
     goto done;
 
   aimarkdown_cmark_node_set_syntax_extension(strikethrough, self);
+  if (positions) token_span(parser, strikethrough, start, end);
 
   tmp = aimarkdown_cmark_node_next(opener->inl_text);
 

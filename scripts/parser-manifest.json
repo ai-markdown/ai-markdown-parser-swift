@@ -5,11 +5,11 @@
   "upstream": {
     "swift-markdown": {
       "url": "https://github.com/ai-markdown/swift-markdown.git",
-      "revision": "61d8b72913a6d8a6baa31c7f1d7615fcb5ea79cc"
+      "revision": "e29bbc61301f20d0ad1d4d07871eebefc5efffab"
     },
     "swift-cmark": {
       "url": "https://github.com/ai-markdown/swift-cmark.git",
-      "revision": "4d50badf53b05562ebcdf62dba8731ca8d8a5d79"
+      "revision": "133dc132f54961cd61f5b931d34e0097cddfa806"
     }
   },
   "licenseHashes": {
@@ -508,7 +508,7 @@
     "AIMarkdownCAtomic/include/module.modulemap": "60346f8e0c04d04b3b56d7ba2c5ea1565f59a9a148d7c9a935089c928932435b",
     "AIMarkdownCMark/aimarkdown-string_token.h": "6a5a0af2b04bbd43dc0b8688a7cb5fbaf3ca76a5ec5137b0428be1f2f0fed9bc",
     "AIMarkdownCMark/arena.c": "d839c45e37be026104dc2a85819c318a02bbb42ce5398c598bb5467f175e7821",
-    "AIMarkdownCMark/blocks.c": "5b4956c7f7f128c2327299dc216ba9002ddfe616dccd00111820cff33938efd7",
+    "AIMarkdownCMark/blocks.c": "c1959e74b24f85a1494a0c7e5f2e7b7bc513db5aa6c8c313d706fb7911618e40",
     "AIMarkdownCMark/buffer.c": "91d47dcd3e554d52b506b3d7a715fc2072d37fcc650c3b847f8a67b459b3a144",
     "AIMarkdownCMark/case_fold_switch.inc": "74ad2a7f750015e43318d68e4dde0fe3b619d5bf976ef5f80f666796326319ea",
     "AIMarkdownCMark/cmark.c": "abc9fea441ab3844c8c3728f441b94f0582cadb483ce1935144093aabc010ef8",
@@ -524,7 +524,7 @@
     "AIMarkdownCMark/include/aimarkdown-buffer.h": "28dffc238c38e72b67a2520a209d71771ad33d75cd3646a1f7d68fcc4b9cd020",
     "AIMarkdownCMark/include/aimarkdown-chunk.h": "cbfc13e15f98079881a833a24b7717d655bf738553300aa3dc45017d665c030c",
     "AIMarkdownCMark/include/aimarkdown-cmark-gfm-extension_api.h": "015efce0e34091f69a48386998303126d3dfe0360bf423fef846965c7d822b99",
-    "AIMarkdownCMark/include/aimarkdown-cmark-gfm.h": "fbb0cdb5a8ac8df8347a20f3c3af63bd1c1fd5d55bd54a39d436c27338f1ec90",
+    "AIMarkdownCMark/include/aimarkdown-cmark-gfm.h": "de70a4983ce29a39f1b54fe347df6dbd19b6339c9db7e4c03e8c753d3bf0cac6",
     "AIMarkdownCMark/include/aimarkdown-cmark-gfm_config.h": "26bd655dc737266f3edcb62c7a5aa53449f198f830a8721c06fe307e0cd229bf",
     "AIMarkdownCMark/include/aimarkdown-cmark-gfm_version.h": "9858802543bb48b39998799cfb21c15097be0ac7a193f38cacc2056d897de728",
     "AIMarkdownCMark/include/aimarkdown-cmark_ctype.h": "1ec56bbe599bf0014be0b0fb621b1180973dca93cdf7b01d72732e74f1ab644e",
@@ -536,7 +536,7 @@
     "AIMarkdownCMark/include/aimarkdown-iterator.h": "8ed760acdea4d3822b86a7dd0e22b3e0db638f9bb16842866fda3bfe1c828622",
     "AIMarkdownCMark/include/aimarkdown-map.h": "70cc7b6f474de7d92af5a98443e562bc10077c977fd71bdf23aaf6b8d1f85663",
     "AIMarkdownCMark/include/aimarkdown-mutex.h": "1b0d1e99d602abc8b73c8e95ed3d4cb459f51f3ff3cfbf586afd699feb6b899e",
-    "AIMarkdownCMark/include/aimarkdown-node.h": "67369c3e70e4a05c3a005a012203d2c4ff7311d597b21020e24c2826b43bfed8",
+    "AIMarkdownCMark/include/aimarkdown-node.h": "9007fc5165e0c6ed256d2c11122a0b2d933133e6f80b6c0777b208ee230e55f4",
     "AIMarkdownCMark/include/aimarkdown-parser.h": "f2a838116c669caa9d55bfba78f1927e7ebbb892e0b529440979d16b16fb93b6",
     "AIMarkdownCMark/include/aimarkdown-plugin.h": "39c8a8c1128b27cc135de378a7e0b7fb56797c0d63192e8365033fc5db26d7a8",
     "AIMarkdownCMark/include/aimarkdown-references.h": "684eadecf67f127e5197557d9aef80b2f9b1a3b6e1fa52ec9aaa1c8c946c2e0f",
@@ -546,11 +546,11 @@
     "AIMarkdownCMark/include/aimarkdown-syntax_extension.h": "af3afeff92ec8062489326c5e3f972ebe173046a8fa5528f774a1afb4f7ec00a",
     "AIMarkdownCMark/include/aimarkdown-utf8.h": "d72be3eacb70dc1667667909c1b082dd618bd859bcc01471f8ba94c2f20d4be0",
     "AIMarkdownCMark/include/module.modulemap": "720a6a40fbda50ae5acc880df570be45e0363128f2f8530da7a906220e1a43c4",
-    "AIMarkdownCMark/inlines.c": "1a0ea40f42855dc4bb6bc3d5eb6d26d774ec0be935ef49296f72b1be2f44a5a0",
+    "AIMarkdownCMark/inlines.c": "74c84d7bcd700d33a5a61cdc66a2a2229893bb919c0b744a0c673c4efbb642fe",
     "AIMarkdownCMark/iterator.c": "a79698eed74c5b8dbdf06ea3e4eb2e691653a81ef75e13feb834c84545e3f482",
     "AIMarkdownCMark/latex.c": "a7c80f910caf9089c2d9052e493469977d3bbeec54dedd02af68026fce722815",
     "AIMarkdownCMark/linked_list.c": "d243b5092009fd02ef9f483506e7198adebaeaadfd06c41ca6f92457a8d8d16a",
-    "AIMarkdownCMark/list_spread.c": "1d2eee31e231be80e3191cda02b33a3defdad072a57780ff6f8c70a92f7089df",
+    "AIMarkdownCMark/list_spread.c": "392099dac953221ffcbe6e3fe979e414ed12e10d1d0b0e32f27eb0d9f5073f2d",
     "AIMarkdownCMark/man.c": "62d0a10a012ac6854afd53421f03e0e8a8a4bdcdb5972415fc2254930feed86a",
     "AIMarkdownCMark/map.c": "910a17564c0a42ef7c817d654df5d185ccdcedf7673623812113278ddf72b673",
     "AIMarkdownCMark/node.c": "27babcb86c192c740b95e2aad2db08637f5c3009f9240cb98d9a6076654cd48f",
@@ -575,14 +575,14 @@
     "AIMarkdownCMarkExtensions/aimarkdown-tagfilter.h": "b2bed64d7046a161c061017f44260e97d36e4ca06d04b958be887eade1c8720f",
     "AIMarkdownCMarkExtensions/aimarkdown-tasklist.h": "a0b8b70e086a2f3ba35b3ec53b901ef17b1b77f6f21997c3fcac14d180b2545b",
     "AIMarkdownCMarkExtensions/aimarkdown-web-autolink.h": "f4c0e9c3b89e5d099b110b9cba97c31c556b53fc38021071704a1dd62ff25538",
-    "AIMarkdownCMarkExtensions/autolink.c": "2d6210c50d8ff74343ead33acc4774e543b583de8aedef3d95970778afe72bc1",
+    "AIMarkdownCMarkExtensions/autolink.c": "fd5794a244870dbf573175faa3d6f74e086b1b80fc7e340fe6fc2dbc812bcafb",
     "AIMarkdownCMarkExtensions/core-extensions.c": "d487a625242379a3a1bcfc7d0b6392bc7d4163ddff9643da2a87bc8e2f8814c5",
     "AIMarkdownCMarkExtensions/ext_scanners.c": "573397f2a3cd4c1bb94f56a7a496463f9e5906bb7b68e88231dfaea802ecdb06",
     "AIMarkdownCMarkExtensions/highlight-unicode.inc": "6a50ce632219838071df17f0f7c75caeee2b4918b3add781d616332a34c9d6b0",
     "AIMarkdownCMarkExtensions/highlight.c": "b5a9fd091dd031a60b344bb8d22cb99b647e9879ee0807080b84b9aa8179a75f",
     "AIMarkdownCMarkExtensions/include/aimarkdown-cmark-gfm-core-extensions.h": "54d26ddde1e360e8c41170ea7dda31d9ad38e697e7fca921f1895715292ff928",
     "AIMarkdownCMarkExtensions/include/module.modulemap": "78e1dcdd426fb8169fc00a40a2de79e9cb3346440d8d1ad0c5a18b87ff117e39",
-    "AIMarkdownCMarkExtensions/strikethrough.c": "a1da4909469263e4bcdc31fd9793b4be2598d40b8a47687d8f86a5dcdcf09a5d",
+    "AIMarkdownCMarkExtensions/strikethrough.c": "1ac76c8c099cf70fbb2098e1cbd40722f7a0c8642d8afa8c5395b97bae73120d",
     "AIMarkdownCMarkExtensions/table.c": "7e764c14a0a668e4fb57aa9f36795d395e43addafed39994b6e0510b507bfe81",
     "AIMarkdownCMarkExtensions/tagfilter.c": "e8e3beb73c8f6267241f35f6288d25fe22f3b3abc9c62c5a0bb13dd906927e18",
     "AIMarkdownCMarkExtensions/tasklist.c": "ffbc3692b8f8997d86bf4d4fd9f62c62dea8ee89bacf973c6ebab312fba765ff",
@@ -647,9 +647,9 @@
     "AIMarkdownParser/Inline Nodes/Inline Leaves/Text.swift": "2f14fbcbf0e1ed20eaa56c050df604c5f447edc12507ba5bba690823dad9faec",
     "AIMarkdownParser/Interpretive Nodes/Aside.swift": "da70010d66f4d6f5d561052717f14f34dda7c754bf4b214b0cd1ed4bfbb79098",
     "AIMarkdownParser/Parser/BlockDirectiveParser.swift": "8e4318dc4ae536ecb9a5096ccc25705170439bd3c1ff7de77fbe24de87fe4efd",
-    "AIMarkdownParser/Parser/CommonMarkConverter.swift": "8013ec27ba1bf288501c411a8b4d33f9adf5ab62e9a08813dfa3b2ea11503f86",
+    "AIMarkdownParser/Parser/CommonMarkConverter.swift": "3735b6f22aacefc91ac4b346ae3ad59f4645311b280b0bebcd258c85a3f78781",
     "AIMarkdownParser/Parser/LazySplitLines.swift": "b81201894371b672bf80379123cec7e8228823702aa184fc4d7ff9b22d8563a9",
-    "AIMarkdownParser/Parser/ParseOptions.swift": "2e6bcbf082073dcaf262097e138f900a2e60af008b2de917b914c25fe26946e5",
+    "AIMarkdownParser/Parser/ParseOptions.swift": "5d9e8079fdb00e55bcf6f8bf5a431edc3e706912fe75579f1faec2a985d3ed4c",
     "AIMarkdownParser/Parser/RangeAdjuster.swift": "4e7563a6a488e021af8d57d7c354d9db9acc5d540294276c632d2200371055b7",
     "AIMarkdownParser/Parser/RangerTracker.swift": "6238bf3bc9c9e7e16ec775601c2902c0ef7476a4ee7e10e234549521259a832b",
     "AIMarkdownParser/Rewriter/MarkupRewriter.swift": "6e033a5df3e8fb9830ded220eb18a3a2b977e60aebe36d7550522bb984938ba4",

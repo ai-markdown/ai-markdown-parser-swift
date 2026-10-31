@@ -495,6 +495,7 @@ struct MarkupParser {
         // Web GFM retains empty cells instead of interpreting colspan/rowspan markers.
         var cmarkOptions = options.contains(.parseWebTables) ? AIMARKDOWN_CMARK_OPT_WEB_TABLES : AIMARKDOWN_CMARK_OPT_TABLE_SPANS
         if options.contains(.parseWebCodeSyntax) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_WEB_CODE_SYNTAX }
+        if options.contains(.parseWebHTMLBlocks) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_WEB_HTML_BLOCKS }
         if options.contains(.parseSoftBreakMetadata) { cmarkOptions |= Int32(AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA) }
         if options.contains(.parseListSpreadMetadata) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_LIST_SPREAD_METADATA }
         if options.contains(.parseWebPositions) { cmarkOptions |= AIMARKDOWN_CMARK_OPT_WEB_POSITIONS }

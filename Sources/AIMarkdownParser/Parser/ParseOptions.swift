@@ -56,6 +56,9 @@ public struct ParseOptions: OptionSet, Sendable {
     /// Preserve actual table cells and use Web GFM pipe boundaries; rendering may normalize to the header width.
     public static let parseWebTables = ParseOptions(rawValue: 1 << 20)
 
+    /// Match Web HTML declaration starts and lazy-container HTML block flow; leaves the legacy profile unchanged.
+    public static let parseWebHTMLBlocks = ParseOptions(rawValue: 1 << 21)
+
     /// Accept Web code delimiter lengths without the legacy 80/255 limits.
     public static let parseWebCodeSyntax = ParseOptions(rawValue: 1 << 16)
 
