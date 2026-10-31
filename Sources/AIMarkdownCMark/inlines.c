@@ -2062,7 +2062,7 @@ static int parse_inline(aimarkdown_cmark_parser *parser, subject *subj, aimarkdo
         strcmp(aimarkdown_cmark_node_get_type_string(parent), "table_cell") == 0) {
       aimarkdown_cmark_code_metadata_table(new_inl);
     }
-    if ((options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES)) && new_inl->type == AIMARKDOWN_CMARK_NODE_CODE &&
+    if ((options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES | AIMARKDOWN_CMARK_OPT_WEB_TABLES)) && new_inl->type == AIMARKDOWN_CMARK_NODE_CODE &&
         strcmp(aimarkdown_cmark_node_get_type_string(parent), "table_cell") == 0) {
       aimarkdown_cmark_chunk *literal = &new_inl->as.literal;
       bufsize_t w = 0;

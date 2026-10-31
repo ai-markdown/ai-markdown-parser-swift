@@ -53,6 +53,9 @@ public struct ParseOptions: OptionSet, Sendable {
     /// Record Web mdast positions from parser events (``Markup/parsedWebRange``) without changing `range`, display or formatting.
     public static let parseWebPositions = ParseOptions(rawValue: 1 << 19)
 
+    /// Preserve actual table cells and use Web GFM pipe boundaries; rendering may normalize to the header width.
+    public static let parseWebTables = ParseOptions(rawValue: 1 << 20)
+
     /// Accept Web code delimiter lengths without the legacy 80/255 limits.
     public static let parseWebCodeSyntax = ParseOptions(rawValue: 1 << 16)
 

@@ -18,6 +18,9 @@
 ///
 /// - All rows must have the same number of cells. Therefore, sibling rows will be expanded with empty cells to fit larger incoming rows. Trimming columns from the table requires explicit action
 /// - Column alignment applies to all cells within in the same column. See ``columnAlignments``.
+///
+/// Parsing with ``ParseOptions/parseWebTables`` instead preserves each row's actual cells and the header alignment width.
+/// Public construction and table setters retain the normalization described above.
 public struct Table: BlockMarkup {
     /// The alignment of all cells under a table column.
     public enum ColumnAlignment: Sendable {

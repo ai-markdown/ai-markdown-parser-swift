@@ -386,7 +386,11 @@ final class RawMarkup: ManagedBuffer<RawMarkupHeader, RawMarkup> {
         return .create(data: .highlight, parsedRange: parsedRange, children: children)
     }
 
-    static func table(columnAlignments: [Table.ColumnAlignment?], parsedRange: SourceRange?, header: RawMarkup, body: RawMarkup) -> RawMarkup {
+    static func table(columnAlignments: [Table.ColumnAlignment?], parsedRange: SourceRange?, header: RawMarkup, body: RawMarkup, preserveHeaderWidth: Bool = false) -> RawMarkup {
+        if preserveHeaderWidth {
+            // Parsed Web rows retain excess cells; the delimiter row alone defines alignment and rendered width.
+            return .create(data: .table(columnAlignments: columnAlignments), parsedRange: parsedRange, children: [header, body])
+        }
         let maxColumnCount = max(header.childCount,
                                  body.children.reduce(0, { (result, child) -> Int in
                                     return max(result, child.childCount)

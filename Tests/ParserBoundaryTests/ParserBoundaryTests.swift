@@ -3,6 +3,52 @@ import AIMarkdownCMark
 import XCTest
 
 final class ParserBoundaryTests: XCTestCase {
+    func testWebTablesRetainActualCellsWithoutWideningHeaderAlignments() throws {
+        // The pinned Web raw tree preserves cells; its display handler separately normalizes width.
+        let source = "| A | B |\n| - | - |\n| short |\n| a | b | c |\n|"
+        let parsed = Document(parsing: source, options: [.parseWebTables, .parseWebPositions])
+        let table = try XCTUnwrap(parsed.child(at: 0) as? Table)
+        XCTAssertEqual(table.columnAlignments.count, 2)
+        XCTAssertEqual(Array(table.body.rows).map(\.childCount), [1, 3, 1])
+        XCTAssertEqual(Array(table.body.rows).map(\.parsedCellCount), [1, 3, 1])
+        XCTAssertTrue(table.body.rows.allSatisfy { $0.parsedWebRange != nil })
+        let copy = try XCTUnwrap(table.withUncheckedChildren(Array(table.children)) as? Table)
+        XCTAssertEqual(copy.columnAlignments.count, 2)
+        XCTAssertEqual(Array(copy.body.rows).map(\.childCount), [1, 3, 1])
+        let legacy = Document(parsing: "| A | B |\n| - | - |\n| short |\n| a | b | c |")
+        let old = try XCTUnwrap(legacy.child(at: 0) as? Table)
+        XCTAssertEqual(Array(old.body.rows).map(\.childCount), [2, 2])
+    }
+
+    func testMathPrefixOnlyEOFAndFootnoteBlankWhitespaceUsePhysicalInput() throws {
+        // Exact values from the pinned Web MathBoundary inputs, before display transforms.
+        let cases: [(String, String, String?)] = [
+            ("> $$\n> x+y\n>", "x+y", nil),
+            ("> $$\n> x+y\n> ", "x+y", nil),
+            ("term\n: $$ latex\n  x+y\n ", "x+y", "latex"),
+            ("term\n: $$ latex\n  x+y\n  ", "x+y", "latex"),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n ", " ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n  ", "  ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n   ", "   ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n    ", "    ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n    y\n ", "y\n ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n    y\n  ", "y\n  ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n    y\n   ", "y\n   ", nil),
+            ("- $$x$$ [^n]\n\n[^n]: note\n\n    $$\n    y\n    ", "y\n    ", nil),
+        ]
+        for ending in ["\n", "\r\n", "\r"] {
+            for (source, value, meta) in cases {
+                let input = source.replacingOccurrences(of: "\n", with: ending)
+                let document = Document(parsing: input, options: [.parseMath, .parseFootnotes, .parseDefinitionLists])
+                let nodes = descendants(document).compactMap { $0 as? MathBlock }
+                XCTAssertEqual(nodes.count, 1, input.debugDescription)
+                let math = try XCTUnwrap(nodes.first)
+                XCTAssertEqual(math.value, value.replacingOccurrences(of: "\n", with: ending), input.debugDescription)
+                XCTAssertEqual(math.meta, meta, input.debugDescription)
+            }
+        }
+    }
+
     func testMathContainerBoundaryValuesAcrossPackageBoundary() throws {
         // Pinned Web e9ec1799fdc380d99ce0a6313023515895bbd7bf regressions.
         // A container's flow boundary excludes one EOL; it is not trimEnd.

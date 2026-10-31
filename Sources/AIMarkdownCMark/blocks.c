@@ -238,11 +238,26 @@ static inline bool contains_inlines(aimarkdown_cmark_node *node) {
 
 static void S_advance_offset(aimarkdown_cmark_parser *parser, aimarkdown_cmark_chunk *input, bufsize_t count, bool columns);
 
+/* A final continuation can consist entirely of consumed container/fence
+ * prefixes. Its synthetic LF is not mathFlow data. Opening/closing fences,
+ * real line endings and partial tabs are separate parser events. */
+static bool math_prefix_only_eof(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *node,
+                                  bufsize_t physical_length) {
+  return node->type == AIMARKDOWN_CMARK_NODE_MATH_BLOCK && node == parser->current &&
+      node->start_line < parser->line_number && !node->math_closing_fence &&
+      parser->definition_synthetic_ending && parser->math_current_ending == 0 &&
+      !parser->partially_consumed_tab && parser->offset > 0 &&
+      parser->offset == physical_length;
+}
+
 static void add_line(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk *ch, aimarkdown_cmark_parser *parser) {
   int chars_to_tab;
   int i;
   bufsize_t code_source_start = node->content.size;
   assert(node->flags & AIMARKDOWN_CMARK_NODE__OPEN);
+  bufsize_t physical_length = ch->len;
+  if (physical_length && ch->data[physical_length - 1] == '\n') physical_length--;
+  if (math_prefix_only_eof(parser, node, physical_length)) return;
   if ((parser->options & AIMARKDOWN_CMARK_OPT_DEFINITION_LISTS) && node->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH &&
       node->content.size > 0 && parser->column > 0 && node->parent &&
       (node->parent->type == AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE || node->parent->type == AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION)) {
@@ -1243,6 +1258,10 @@ static bool parse_block_quote_prefix(aimarkdown_cmark_parser *parser, aimarkdown
 
 static bool parse_footnote_definition_block_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_chunk *input,
                                                    aimarkdown_cmark_node *container) {
+  /* GFM footnote blankLine is a non-consuming continuation. For an open
+   * math leaf its whitespace remains math data, even below four columns.
+   * Other leaves keep their existing prefix and metadata behavior. */
+  if (parser->blank && parser->current->type == AIMARKDOWN_CMARK_NODE_MATH_BLOCK) return true;
   if (parser->indent >= 4) {
     if ((parser->options & AIMARKDOWN_CMARK_OPT_CODE_METADATA) && parser->blank && parser->code_footnote_blank_offset < 0) {
       parser->code_footnote_blank_offset = parser->offset;

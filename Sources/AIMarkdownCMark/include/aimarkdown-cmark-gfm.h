@@ -846,6 +846,11 @@ AIMARKDOWN_CMARK_GFM_EXPORT int aimarkdown_cmark_node_get_list_spread(aimarkdown
  * inline-subject offsets mapped through each content line's physical start.
  * Existing source positions, rendering and tightness are unchanged. */
 #define AIMARKDOWN_CMARK_OPT_WEB_POSITIONS (1 << 6)
+
+/** Parse Web-compatible table dividers and retain each row's actual cells.
+ * The table extension must also be attached. Header alignments remain unchanged.
+ */
+#define AIMARKDOWN_CMARK_OPT_WEB_TABLES (1 << 7)
 /** Writes the captured Web position as 1-based lines and byte columns with an
  * exclusive end. Returns a mask: 1 when the start was captured, 2 when the end
  * was captured; 0 when nothing was captured. Callers must not substitute values. */
