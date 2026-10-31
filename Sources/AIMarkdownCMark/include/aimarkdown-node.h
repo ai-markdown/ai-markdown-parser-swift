@@ -149,6 +149,11 @@ struct aimarkdown_cmark_node {
   } definition;
   int math_fence_length;
   bool math_closing_fence;
+  /* Last physical quote continuation, before document's EOF exit moves its
+   * line ending outside mathFlow. Zero when no such line was consumed. */
+  int math_quote_line, math_quote_column;
+  bool math_quote_prefix_only;
+  int math_container_eof_line; /* Only actual container prefixes remained at EOF. */
   aimarkdown_cmark_math_line *math_lines;
   size_t math_line_count, math_line_capacity;
 
@@ -244,6 +249,7 @@ void aimarkdown_cmark_list_spread_line(struct aimarkdown_cmark_parser *parser);
 void aimarkdown_cmark_list_spread_prefix(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
 void aimarkdown_cmark_list_spread_open(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
 void aimarkdown_cmark_list_spread_close(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
+void aimarkdown_cmark_list_spread_boundary(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *container);
 void aimarkdown_cmark_list_spread_leaf(struct aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *leaf, bool closed);
 void aimarkdown_cmark_list_spread_prefix_only(struct aimarkdown_cmark_parser *parser, bool prefix_only);
 void aimarkdown_cmark_list_spread_end_line(struct aimarkdown_cmark_parser *parser, bool has_line_ending, int content_length);

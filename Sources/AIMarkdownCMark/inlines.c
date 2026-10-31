@@ -1236,6 +1236,52 @@ aimarkdown_cmark_chunk aimarkdown_cmark_clean_attributes(aimarkdown_cmark_mem *m
   return aimarkdown_cmark_clean_url(mem, attributes);
 }
 
+/* micromark htmlText excludes at most three virtual columns of linePrefix
+ * after every physical line ending, including inside quoted attributes and
+ * comments. Definition-list paragraphs retain this whitespace in their inline
+ * subject. Compile only that opt-in profile, using the actual matched interval
+ * and the block parser's physical line records; legacy ranges keep the original
+ * subject coordinates. Tabs partially consumed by linePrefix leave virtual
+ * spaces, while a tab after the three-column limit stays a literal tab. */
+static aimarkdown_cmark_chunk definition_html_text_value(subject *subj, bufsize_t start,
+                                               bufsize_t end) {
+  aimarkdown_cmark_chunk original = aimarkdown_cmark_chunk_dup(&subj->input, start, end - start);
+  if (!memchr(original.data, '\n', original.len)) return original;
+  aimarkdown_cmark_strbuf value = AIMARKDOWN_CMARK_BUF_INIT(subj->mem);
+  for (bufsize_t i = start; i < end;) {
+    unsigned char c = subj->input.data[i++];
+    if (c != '\n') {
+      aimarkdown_cmark_strbuf_putc(&value, c);
+      continue;
+    }
+    const aimarkdown_cmark_math_line *row = math_line_at(subj, i - 1);
+    const aimarkdown_cmark_math_line *next = math_line_at(subj, i);
+    if (!row || !next || next == row || next->offset != i ||
+        (row->ending != 10 && row->ending != 13 && row->ending != 0x0d0a)) {
+      aimarkdown_cmark_strbuf_free(&value);
+      return original;
+    }
+    if (row->ending != 10) aimarkdown_cmark_strbuf_putc(&value, '\r');
+    if (row->ending != 13) aimarkdown_cmark_strbuf_putc(&value, '\n');
+    int consumed = 0, column = next->visual_column;
+    while (i < end && consumed < 3) {
+      c = subj->input.data[i];
+      if (c != ' ' && c != '\t') break;
+      int width = c == '\t' ? 4 - (column - 1) % 4 : 1;
+      int take = width < 3 - consumed ? width : 3 - consumed;
+      i++;
+      consumed += take;
+      column += width;
+      for (int j = take; j < width; j++) aimarkdown_cmark_strbuf_putc(&value, ' ');
+    }
+  }
+  if (value.size == original.len && !memcmp(value.ptr, original.data, value.size)) {
+    aimarkdown_cmark_strbuf_free(&value);
+    return original;
+  }
+  return aimarkdown_cmark_chunk_buf_detach(&value);
+}
+
 // Parse an autolink or HTML tag.
 // Assumes the subject has a '<' character at the current position.
 static aimarkdown_cmark_node *handle_pointy_brace(subject *subj, int options) {
@@ -1321,7 +1367,9 @@ static aimarkdown_cmark_node *handle_pointy_brace(subject *subj, int options) {
     }
   }
   if (matchlen > 0) {
-    contents = aimarkdown_cmark_chunk_dup(&subj->input, subj->pos - 1, matchlen + 1);
+    contents = (options & AIMARKDOWN_CMARK_OPT_DEFINITION_LISTS)
+        ? definition_html_text_value(subj, subj->pos - 1, subj->pos + matchlen)
+        : aimarkdown_cmark_chunk_dup(&subj->input, subj->pos - 1, matchlen + 1);
     subj->pos += matchlen;
     aimarkdown_cmark_node *node = make_raw_html(subj, subj->pos - matchlen - 1, subj->pos - 1, contents);
     adjust_subj_node_newlines(subj, node, matchlen, 1, options);
@@ -2028,8 +2076,9 @@ static int parse_inline(aimarkdown_cmark_parser *parser, subject *subj, aimarkdo
     return 0;
   }
   // Web literal emails may start with punctuation owned by builtin parsers.
-  // These characters must not be registered as extension delimiters: doing so
+  // Underscore stays a builtin delimiter: registering it with the extension
   // would redirect emphasis resolution to an extension without an insert hook.
+  // Hyphen and period may be special scan stops without owning delimiters.
   if (c == '_' || c == '-' || c == '.') {
     for (aimarkdown_cmark_llist *item = parser->inline_syntax_extensions; item; item = item->next) {
       aimarkdown_cmark_syntax_extension *extension = (aimarkdown_cmark_syntax_extension *)item->data;

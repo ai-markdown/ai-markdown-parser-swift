@@ -17,8 +17,8 @@ DEST = ROOT / "Sources"
 MANIFEST = ROOT / "scripts/parser-manifest.json"
 MODULES = {"cmark_gfm": "AIMarkdownCMark", "cmark_gfm_extensions": "AIMarkdownCMarkExtensions",
            "CAtomic": "AIMarkdownCAtomic"}
-# Skip comments and string/character literals, preserving include names and runtime strings.
-TOKENS = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\b[A-Za-z_][A-Za-z_0-9]*\b', re.S)
+# Preserve angle includes as well as quoted includes until header-name isolation.
+TOKENS = re.compile(r'^[ \t]*#[ \t]*include[ \t]*<[^>\n]+>|//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\b[A-Za-z_][A-Za-z_0-9]*\b', re.S | re.M)
 
 
 def run(args, **kwargs):

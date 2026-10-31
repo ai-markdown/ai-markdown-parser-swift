@@ -170,8 +170,8 @@ final class ParserBoundaryTests: XCTestCase {
             })
             XCTAssertEqual(original.format(), captured.format())
         }
-        let unsupported = Document(parsing: "- a\n\n- b\n\nterm\n: body", options: [.parseListSpreadMetadata, .parseDefinitionLists])
-        XCTAssertTrue(descendants(unsupported).compactMap { $0 as? UnorderedList }.allSatisfy { $0.parsedSpread == nil })
+        let definitions = Document(parsing: "- a\n\n- b\n\nterm\n: body", options: [.parseListSpreadMetadata, .parseDefinitionLists])
+        XCTAssertEqual(descendants(definitions).compactMap { $0 as? UnorderedList }.map(\.parsedSpread), [true])
         XCTAssertNil(ListItem(Paragraph(Text("x"))).parsedSpread)
         XCTAssertNil(UnorderedList(ListItem(Paragraph(Text("x")))).parsedSpread)
         var item = try XCTUnwrap(descendants(Document(parsing: "- a\n\n  b", options: [.parseListSpreadMetadata])).compactMap { $0 as? ListItem }.first)
@@ -249,5 +249,29 @@ final class ParserBoundaryTests: XCTestCase {
         XCTAssertEqual(aimarkdown_cmark_node_set_type(softBreak, AIMARKDOWN_CMARK_NODE_LINEBREAK), 1)
         XCTAssertEqual(aimarkdown_cmark_node_set_type(softBreak, AIMARKDOWN_CMARK_NODE_SOFTBREAK), 1)
         XCTAssertEqual(aimarkdown_cmark_node_get_softbreak_ending(softBreak), 0)
+    }
+
+    func testDefinitionContainersRetainListLedgerAndPhysicalTermPositions() throws {
+        // Actual Web e9ec1799 raw events, also frozen in the C definition ledger fixture.
+        func point(_ line: Int, _ column: Int) -> SourceLocation { SourceLocation(line: line, column: column, source: nil) }
+        let source = "> term\n> : - a\n>\n>   - b\n"
+        let parsed = Document(parsing: source, options: [.parseDefinitionLists, .parseListSpreadMetadata, .parseWebPositions])
+        let nodes = descendants(parsed)
+        let list = try XCTUnwrap(nodes.compactMap { $0 as? UnorderedList }.first)
+        XCTAssertEqual(list.parsedSpread, true)
+        XCTAssertEqual(nodes.compactMap { $0 as? ListItem }.map(\.parsedSpread), [false, false])
+        XCTAssertEqual(list.parsedWebRange, point(2, 5)..<point(4, 8))
+        XCTAssertEqual(nodes.first { $0 is DefinitionList }?.parsedWebRange, point(1, 3)..<point(5, 1))
+        XCTAssertEqual(nodes.first { $0 is DefinitionTerm }?.parsedWebRange, point(1, 3)..<point(2, 1))
+        XCTAssertEqual(nodes.first { $0 is DefinitionDescription }?.parsedWebRange, point(2, 5)..<point(5, 1))
+        XCTAssertEqual(nodes.first { $0 is BlockQuote }?.parsedWebRange, point(1, 1)..<point(5, 1))
+        XCTAssertEqual(nodes.compactMap { $0 as? Text }.first?.parsedWebRange, point(1, 3)..<point(1, 7))
+
+        let legacy = Document(parsing: source, options: [.parseDefinitionLists])
+        XCTAssertTrue(descendants(legacy).allSatisfy { $0.parsedWebRange == nil })
+        XCTAssertNil(descendants(legacy).compactMap { $0 as? UnorderedList }.first?.parsedSpread)
+        let moved = Document(parsing: "> quote\nTerm\n: body", options: [.parseDefinitionLists, .parseWebPositions])
+        XCTAssertEqual(descendants(moved).first { $0 is BlockQuote }?.parsedWebRange, point(1, 1)..<point(2, 1))
+        XCTAssertEqual(descendants(moved).compactMap { $0 as? Text }.last?.parsedWebRange, point(3, 3)..<point(3, 7))
     }
 }

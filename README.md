@@ -38,6 +38,7 @@ cd ai-markdown-parser-swift
 git submodule update --init --checkout
 swift test
 python3 scripts/generate-parser.py --check
+python3 scripts/test-generate-parser.py
 python3 scripts/sync-upstream-tests.py --check
 ```
 

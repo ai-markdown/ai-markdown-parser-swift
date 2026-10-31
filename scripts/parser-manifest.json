@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "sourceRoot": "Sources",
-  "generatorSHA256": "f86f6a0db797270e265148aa8bf2a5981c6455f247212b7daed61344148733c1",
+  "generatorSHA256": "a0bd342e194e4fc8d20f8a3269c482d02852156101b9bc286f5704fb841b17ff",
   "upstream": {
     "swift-markdown": {
       "url": "https://github.com/ai-markdown/swift-markdown.git",
@@ -9,7 +9,7 @@
     },
     "swift-cmark": {
       "url": "https://github.com/ai-markdown/swift-cmark.git",
-      "revision": "4469043f77440538b3e568d27107c588b816225b"
+      "revision": "4d50badf53b05562ebcdf62dba8731ca8d8a5d79"
     }
   },
   "licenseHashes": {
@@ -260,6 +260,7 @@
     "cmark_iter_new": "aimarkdown_cmark_iter_new",
     "cmark_iter_next": "aimarkdown_cmark_iter_next",
     "cmark_iter_reset": "aimarkdown_cmark_iter_reset",
+    "cmark_list_spread_boundary": "aimarkdown_cmark_list_spread_boundary",
     "cmark_list_spread_close": "aimarkdown_cmark_list_spread_close",
     "cmark_list_spread_continued": "aimarkdown_cmark_list_spread_continued",
     "cmark_list_spread_end_line": "aimarkdown_cmark_list_spread_end_line",
@@ -507,7 +508,7 @@
     "AIMarkdownCAtomic/include/module.modulemap": "60346f8e0c04d04b3b56d7ba2c5ea1565f59a9a148d7c9a935089c928932435b",
     "AIMarkdownCMark/aimarkdown-string_token.h": "6a5a0af2b04bbd43dc0b8688a7cb5fbaf3ca76a5ec5137b0428be1f2f0fed9bc",
     "AIMarkdownCMark/arena.c": "d839c45e37be026104dc2a85819c318a02bbb42ce5398c598bb5467f175e7821",
-    "AIMarkdownCMark/blocks.c": "f28e82de9e4e9147d29640aa1443b68658193008435be9663906fad43ea98ce6",
+    "AIMarkdownCMark/blocks.c": "5b4956c7f7f128c2327299dc216ba9002ddfe616dccd00111820cff33938efd7",
     "AIMarkdownCMark/buffer.c": "91d47dcd3e554d52b506b3d7a715fc2072d37fcc650c3b847f8a67b459b3a144",
     "AIMarkdownCMark/case_fold_switch.inc": "74ad2a7f750015e43318d68e4dde0fe3b619d5bf976ef5f80f666796326319ea",
     "AIMarkdownCMark/cmark.c": "abc9fea441ab3844c8c3728f441b94f0582cadb483ce1935144093aabc010ef8",
@@ -535,8 +536,8 @@
     "AIMarkdownCMark/include/aimarkdown-iterator.h": "8ed760acdea4d3822b86a7dd0e22b3e0db638f9bb16842866fda3bfe1c828622",
     "AIMarkdownCMark/include/aimarkdown-map.h": "70cc7b6f474de7d92af5a98443e562bc10077c977fd71bdf23aaf6b8d1f85663",
     "AIMarkdownCMark/include/aimarkdown-mutex.h": "1b0d1e99d602abc8b73c8e95ed3d4cb459f51f3ff3cfbf586afd699feb6b899e",
-    "AIMarkdownCMark/include/aimarkdown-node.h": "712ddeb5b5f8dd3c142070cd1fe1fd451e4e68d8842640dc9f90bd58a07becc9",
-    "AIMarkdownCMark/include/aimarkdown-parser.h": "449ba635829262328b039704d8a2b4e3f8a889d79aafd1374ab17e00773f33d3",
+    "AIMarkdownCMark/include/aimarkdown-node.h": "67369c3e70e4a05c3a005a012203d2c4ff7311d597b21020e24c2826b43bfed8",
+    "AIMarkdownCMark/include/aimarkdown-parser.h": "f2a838116c669caa9d55bfba78f1927e7ebbb892e0b529440979d16b16fb93b6",
     "AIMarkdownCMark/include/aimarkdown-plugin.h": "39c8a8c1128b27cc135de378a7e0b7fb56797c0d63192e8365033fc5db26d7a8",
     "AIMarkdownCMark/include/aimarkdown-references.h": "684eadecf67f127e5197557d9aef80b2f9b1a3b6e1fa52ec9aaa1c8c946c2e0f",
     "AIMarkdownCMark/include/aimarkdown-registry.h": "1cf123a241bb16a35db8ec1a4a2c71e6af6732d4eb80086396cf31cb2895171d",
@@ -545,11 +546,11 @@
     "AIMarkdownCMark/include/aimarkdown-syntax_extension.h": "af3afeff92ec8062489326c5e3f972ebe173046a8fa5528f774a1afb4f7ec00a",
     "AIMarkdownCMark/include/aimarkdown-utf8.h": "d72be3eacb70dc1667667909c1b082dd618bd859bcc01471f8ba94c2f20d4be0",
     "AIMarkdownCMark/include/module.modulemap": "720a6a40fbda50ae5acc880df570be45e0363128f2f8530da7a906220e1a43c4",
-    "AIMarkdownCMark/inlines.c": "0f6085f3729a1ed24344c0c900333efa035dfd1ab95d17466f64be362426257e",
+    "AIMarkdownCMark/inlines.c": "1a0ea40f42855dc4bb6bc3d5eb6d26d774ec0be935ef49296f72b1be2f44a5a0",
     "AIMarkdownCMark/iterator.c": "a79698eed74c5b8dbdf06ea3e4eb2e691653a81ef75e13feb834c84545e3f482",
     "AIMarkdownCMark/latex.c": "a7c80f910caf9089c2d9052e493469977d3bbeec54dedd02af68026fce722815",
     "AIMarkdownCMark/linked_list.c": "d243b5092009fd02ef9f483506e7198adebaeaadfd06c41ca6f92457a8d8d16a",
-    "AIMarkdownCMark/list_spread.c": "fc2d876a6a64b2f7b63dfad3b7d0ef030a7d870a9ae9d478a2c15abb57ae4581",
+    "AIMarkdownCMark/list_spread.c": "1d2eee31e231be80e3191cda02b33a3defdad072a57780ff6f8c70a92f7089df",
     "AIMarkdownCMark/man.c": "62d0a10a012ac6854afd53421f03e0e8a8a4bdcdb5972415fc2254930feed86a",
     "AIMarkdownCMark/map.c": "910a17564c0a42ef7c817d654df5d185ccdcedf7673623812113278ddf72b673",
     "AIMarkdownCMark/node.c": "27babcb86c192c740b95e2aad2db08637f5c3009f9240cb98d9a6076654cd48f",
@@ -582,10 +583,10 @@
     "AIMarkdownCMarkExtensions/include/aimarkdown-cmark-gfm-core-extensions.h": "54d26ddde1e360e8c41170ea7dda31d9ad38e697e7fca921f1895715292ff928",
     "AIMarkdownCMarkExtensions/include/module.modulemap": "78e1dcdd426fb8169fc00a40a2de79e9cb3346440d8d1ad0c5a18b87ff117e39",
     "AIMarkdownCMarkExtensions/strikethrough.c": "a1da4909469263e4bcdc31fd9793b4be2598d40b8a47687d8f86a5dcdcf09a5d",
-    "AIMarkdownCMarkExtensions/table.c": "88277c1dc59c292345a3651320f45001b117b9b8bb19a37b9c54b95ab6f2f30c",
+    "AIMarkdownCMarkExtensions/table.c": "7e764c14a0a668e4fb57aa9f36795d395e43addafed39994b6e0510b507bfe81",
     "AIMarkdownCMarkExtensions/tagfilter.c": "e8e3beb73c8f6267241f35f6288d25fe22f3b3abc9c62c5a0bb13dd906927e18",
     "AIMarkdownCMarkExtensions/tasklist.c": "ffbc3692b8f8997d86bf4d4fd9f62c62dea8ee89bacf973c6ebab312fba765ff",
-    "AIMarkdownCMarkExtensions/web-autolink.c": "6ec2b7891e01b9a2278797e257ee29000f5519bb9dcd2da7cd466c55c772e352",
+    "AIMarkdownCMarkExtensions/web-autolink.c": "1a7c27ca33a43cc9f05f87c94a8f6143e017fb3918c0bae3cbd45091cd0ce3a7",
     "AIMarkdownParser/Base/ChildIndexPath.swift": "f15a58e78dd193f845e6cf204bca159ded425f4e200daa45636a8544a57719e6",
     "AIMarkdownParser/Base/DirectiveArgument.swift": "b6cecd7515a43a3ee508ee9ac37619bc5a1cb42fd55c8188619270a0850fc4d8",
     "AIMarkdownParser/Base/Document.swift": "2c20196035e10455528eb387a083df686b13f206d2b5abeae31030fca35bfa73",

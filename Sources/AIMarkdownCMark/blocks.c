@@ -257,7 +257,18 @@ static void add_line(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk *ch, ai
   assert(node->flags & AIMARKDOWN_CMARK_NODE__OPEN);
   bufsize_t physical_length = ch->len;
   if (physical_length && ch->data[physical_length - 1] == '\n') physical_length--;
+  if (physical_length && ch->data[physical_length - 1] == '\r') physical_length--;
   if (math_prefix_only_eof(parser, node, physical_length)) return;
+  if (node->type == AIMARKDOWN_CMARK_NODE_MATH_BLOCK && parser->math_current_ending != 0) {
+    for (aimarkdown_cmark_node *owner = node->parent; owner; owner = owner->parent) {
+      if (owner->type != AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE) continue;
+      node->math_quote_line = parser->line_number;
+      node->math_quote_column = physical_length + 1;
+      node->math_quote_prefix_only = !parser->partially_consumed_tab &&
+          parser->offset == physical_length;
+      break;
+    }
+  }
   if ((parser->options & AIMARKDOWN_CMARK_OPT_DEFINITION_LISTS) && node->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH &&
       node->content.size > 0 && parser->column > 0 && node->parent &&
       (node->parent->type == AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE || node->parent->type == AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION)) {
@@ -273,7 +284,7 @@ static void add_line(aimarkdown_cmark_node *node, aimarkdown_cmark_chunk *ch, ai
       aimarkdown_cmark_strbuf_putc(&node->content, ' ');
     }
   }
-  if ((parser->options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES | AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_CODE_METADATA | AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA | AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)) &&
+  if ((parser->options & (AIMARKDOWN_CMARK_OPT_MATH | AIMARKDOWN_CMARK_OPT_DEFINITION_LISTS | AIMARKDOWN_CMARK_OPT_REFERENCE_DEFINITIONS | AIMARKDOWN_CMARK_OPT_REFERENCE_USAGES | AIMARKDOWN_CMARK_OPT_WEB_CHARACTER_REFERENCES | AIMARKDOWN_CMARK_OPT_CODE_METADATA | AIMARKDOWN_CMARK_OPT_SOFTBREAK_METADATA | AIMARKDOWN_CMARK_OPT_WEB_POSITIONS)) &&
       (node->type == AIMARKDOWN_CMARK_NODE_PARAGRAPH || node->type == AIMARKDOWN_CMARK_NODE_HEADING)) {
     if (node->math_line_count == node->math_line_capacity) {
       node->math_line_capacity = node->math_line_capacity ? node->math_line_capacity * 2 : 8;
@@ -513,12 +524,29 @@ static aimarkdown_cmark_node *finalize(aimarkdown_cmark_parser *parser, aimarkdo
     b->end_line = parser->line_number + 1;
     b->end_column = 0;
   }
+  if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) &&
+      (b->type == AIMARKDOWN_CMARK_NODE_DEFINITION_LIST || b->type == AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION))
+    aimarkdown_cmark_web_position_set_start(b, b->start_line, b->start_column);
   aimarkdown_cmark_strbuf *node_content = &b->content;
 
   if (S_type(b) == AIMARKDOWN_CMARK_NODE_MATH_BLOCK && parser->curline.size == 0 &&
+      !b->math_closing_fence && b->math_container_eof_line == parser->line_number) {
+    /* No flow chunk starts after a final container-only prefix. Fence indent
+     * is deliberately excluded: it is consumed later by mathFlow itself. */
+    b->end_line = parser->line_number;
+    b->end_column = 0;
+  }
+
+  if (S_type(b) == AIMARKDOWN_CMARK_NODE_MATH_BLOCK && parser->curline.size == 0 &&
       !b->math_closing_fence && parser->math_last_line_ending) {
-    b->end_line = parser->line_number + 1;
-    b->end_column = 0; // exclusive EOF is column 1 of the following line
+    if (b->math_quote_line == parser->line_number) {
+      /* document exits the quote before its final physical line ending. */
+      b->end_line = b->math_quote_line;
+      b->end_column = b->math_quote_column - 1;
+    } else {
+      b->end_line = parser->line_number + 1;
+      b->end_column = 0; // exclusive EOF is column 1 of the following line
+    }
   }
 
   if (S_type(b) == AIMARKDOWN_CMARK_NODE_MATH_BLOCK && !b->math_closing_fence) {
@@ -561,7 +589,8 @@ static aimarkdown_cmark_node *finalize(aimarkdown_cmark_parser *parser, aimarkdo
     // and remove exactly one boundary EOL, not all trailing blank lines or
     // whitespace. Source coordinates above still describe the original bytes.
     bool container_prefix = false;
-    if (!b->math_closing_fence && parser->curline.size > 0) {
+    if (!b->math_closing_fence && (parser->curline.size > 0 ||
+        (b->math_quote_line == parser->line_number && b->math_quote_prefix_only))) {
       for (aimarkdown_cmark_node *owner = b->parent; owner; owner = owner->parent) {
         aimarkdown_cmark_node *next = owner->next;
         if (next && next->start_line == parser->line_number &&
@@ -1366,6 +1395,10 @@ static bufsize_t math_fence(aimarkdown_cmark_chunk *input, bufsize_t start, bool
 
 static bool parse_math_prefix(aimarkdown_cmark_parser *parser, aimarkdown_cmark_chunk *input,
                               aimarkdown_cmark_node *container, bool *should_continue) {
+  if (parser->definition_synthetic_ending && parser->math_current_ending == 0 &&
+      !parser->partially_consumed_tab && parser->offset > 0 &&
+      parser->offset == input->len - 1)
+    container->math_container_eof_line = parser->line_number;
   bufsize_t matched = parser->indent <= 3 ? math_fence(input, parser->first_nonspace, true) : 0;
   if (matched >= container->math_fence_length && matched > 0) {
     container->math_closing_fence = true; // finalize this line, not the previous line
@@ -1463,7 +1496,6 @@ static aimarkdown_cmark_node *check_open_blocks(aimarkdown_cmark_parser *parser,
       aimarkdown_cmark_list_spread_prefix(parser, container);
       break;
     case AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION:
-      aimarkdown_cmark_list_spread_unsupported(parser);
       if (parser->blank) {
         container->definition.blank_lines++;
         S_advance_offset(parser, input, MIN(parser->indent, container->definition.padding), true);
@@ -1471,6 +1503,7 @@ static aimarkdown_cmark_node *check_open_blocks(aimarkdown_cmark_parser *parser,
         parser->definition_lazy_code = true;
         goto done;
       } else if (parser->indent >= container->definition.padding) {
+        parser->definition_prefix_size = container->definition.padding;
         S_advance_offset(parser, input, container->definition.padding, true);
         container->definition.blank_lines = 0;
         container->definition.initial_blank = false;
@@ -1893,6 +1926,7 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
   // then treat this as a "lazy continuation line" and add it to
   // the open paragraph.
   if (parser->current != last_matched_container &&
+      !parser->definition_marker_interrupt &&
       container == last_matched_container && (!parser->blank || (parser->options & AIMARKDOWN_CMARK_OPT_PRESERVE_WHITESPACE)) &&
       S_type(parser->current) == AIMARKDOWN_CMARK_NODE_PARAGRAPH) {
     if ((parser->options & AIMARKDOWN_CMARK_OPT_DEFINITION_LISTS) && parser->current->definition.lazy_offset == 0) {
@@ -1988,6 +2022,35 @@ static void add_text_to_container(aimarkdown_cmark_parser *parser, aimarkdown_cm
 
 // Definition lists are document containers. Recognize markers while the
 // paragraph buffer and container continuation state are still available.
+static void definition_copy_line(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *target,
+                                  const aimarkdown_cmark_math_line *source, bufsize_t offset) {
+  if (target->math_line_count == target->math_line_capacity) {
+    target->math_line_capacity = target->math_line_capacity ? target->math_line_capacity * 2 : 1;
+    target->math_lines = parser->mem->realloc(target->math_lines,
+        target->math_line_capacity * sizeof(aimarkdown_cmark_math_line));
+  }
+  aimarkdown_cmark_math_line *line = &target->math_lines[target->math_line_count++];
+  *line = *source;
+  line->offset -= offset;
+  line->prefix = aimarkdown_cmark_chunk_dup((aimarkdown_cmark_chunk *)&source->prefix, 0, source->prefix.len);
+  aimarkdown_cmark_chunk_to_cstr(parser->mem, &line->prefix);
+}
+
+/* Definition resolution splits previously consumed paragraph chunks. Move
+ * their physical line mappings with the text instead of reconstructing columns
+ * after quote/definition prefixes have been discarded. */
+static void definition_move_tail(aimarkdown_cmark_parser *parser, aimarkdown_cmark_node *source,
+                                  aimarkdown_cmark_node *target, bufsize_t offset) {
+  size_t kept = source->math_line_count;
+  for (size_t i = 0; i < source->math_line_count; i++) {
+    if (source->math_lines[i].offset < offset) continue;
+    if (kept == source->math_line_count) kept = i;
+    definition_copy_line(parser, target, &source->math_lines[i], offset);
+    aimarkdown_cmark_chunk_free(parser->mem, &source->math_lines[i].prefix);
+  }
+  source->math_line_count = kept;
+}
+
 static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_chunk *input,
                               aimarkdown_cmark_node **matched) {
   if (!(parser->options & AIMARKDOWN_CMARK_OPT_DEFINITION_LISTS)) return false;
@@ -1995,9 +2058,9 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
   if (parser->indent >= 4 || peek_at(input, parser->first_nonspace) != ':' ||
       !(S_is_space_or_tab(peek_at(input, parser->first_nonspace + 1)) ||
         S_is_line_end_char(peek_at(input, parser->first_nonspace + 1)))) return false;
-  /* Definition-list markers can restructure surrounding flow in Web parsing;
-   * list spread is not derived for documents containing a marker candidate. */
-  aimarkdown_cmark_list_spread_unsupported(parser);
+  /* A document definition marker interrupts an unmatched container's lazy
+   * flow even when that container cannot supply an external definition term. */
+  parser->definition_marker_interrupt = true;
   aimarkdown_cmark_node *container = *matched;
   aimarkdown_cmark_node *list = NULL;
   aimarkdown_cmark_node *term = NULL;
@@ -2020,6 +2083,7 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
         term = make_block(parser->mem, AIMARKDOWN_CMARK_NODE_PARAGRAPH,
                           old->definition.lazy_line, old->definition.lazy_column);
         aimarkdown_cmark_strbuf_put(&term->content, old->content.ptr + lazy_offset, old->content.size - lazy_offset);
+        definition_move_tail(parser, old, term, lazy_offset);
         aimarkdown_cmark_strbuf_truncate(&old->content, lazy_offset);
         old->definition.hardbreak = true;
         int final_line = old->definition.lazy_line - 1;
@@ -2027,7 +2091,12 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
           aimarkdown_cmark_node *closing = parser->current;
           aimarkdown_cmark_node *closing_parent = closing->parent;
           parser->current = finalize(parser, closing);
-          if (closing_parent->last_child == closing) { closing->end_line = final_line + 1; closing->end_column = 0; }
+          if (closing_parent->last_child == closing) {
+            closing->end_line = final_line + 1;
+            closing->end_column = 0;
+            if (closing->type == AIMARKDOWN_CMARK_NODE_BLOCK_QUOTE)
+              aimarkdown_cmark_list_spread_boundary(parser, closing);
+          }
         }
         aimarkdown_cmark_node_append_child(container, term);
         term->definition.no_reference = true;
@@ -2057,6 +2126,7 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
         term = make_block(parser->mem, AIMARKDOWN_CMARK_NODE_PARAGRAPH, preceding->definition.flow_line,
                           preceding->definition.flow_column);
         aimarkdown_cmark_strbuf_put(&term->content, preceding->content.ptr + offset, preceding->content.size - offset);
+        definition_move_tail(parser, preceding, term, offset);
         aimarkdown_cmark_strbuf_truncate(&preceding->content, offset);
         preceding->definition.hardbreak = true;
         if (preceding->flags & AIMARKDOWN_CMARK_NODE__OPEN) finalize(parser, preceding);
@@ -2074,8 +2144,12 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
     if (term->prev && term->prev->type == AIMARKDOWN_CMARK_NODE_DEFINITION_LIST) {
       list = term->prev;
       if (list->last_child) {
+        bool relocated = list->last_child->end_line > term->start_line;
         list->last_child->end_line = term->start_line;
         list->last_child->end_column = (term->definition.term_start_column > 0 ? term->definition.term_start_column : term->start_column) - 1;
+        /* A closed segment already has its document exit before continued
+         * prefixes. Only a term extracted from an open flow relocates it. */
+        if (relocated) aimarkdown_cmark_list_spread_boundary(parser, list->last_child);
       }
       list->flags |= AIMARKDOWN_CMARK_NODE__OPEN;
     } else {
@@ -2087,8 +2161,14 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
       }
       else aimarkdown_cmark_node_insert_before(term, list);
     }
+    /* An empty description at EOF takes its start from this segment's
+     * term-flow token, not from the first segment of a merged definition list. */
+    list->definition.flow_line = omit_term ? term->definition.flow_line : term->start_line;
+    list->definition.flow_column = omit_term ? term->definition.flow_column :
+        term->definition.term_start_column > 0 ? term->definition.term_start_column : term->start_column;
     // Each paragraph flow line is a separate term; inline parsing happens later.
     int line = term->start_line;
+    size_t term_line_index = 0;
     for (bufsize_t start = 0; !omit_term && start < term->content.size; ) {
       bufsize_t end = start;
       while (end < term->content.size && !S_is_line_end_char(term->content.ptr[end])) end++;
@@ -2116,8 +2196,13 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
         }
       }
       aimarkdown_cmark_strbuf_put(&item->content, term->content.ptr + start, content_end - start);
+      while (term_line_index < term->math_line_count && term->math_lines[term_line_index].offset < start)
+        term_line_index++;
+      if (term_line_index < term->math_line_count && term->math_lines[term_line_index].offset == start)
+        definition_copy_line(parser, item, &term->math_lines[term_line_index++], start);
       item->end_line = line + 1;
       item->end_column = 0;
+      aimarkdown_cmark_list_spread_boundary(parser, item);
       aimarkdown_cmark_node_append_child(list, item);
       if (end < term->content.size && term->content.ptr[end] == '\r') end++;
       if (end < term->content.size && term->content.ptr[end] == '\n') end++;
@@ -2141,17 +2226,22 @@ static bool S_open_definition(aimarkdown_cmark_parser *parser, aimarkdown_cmark_
     S_advance_offset(parser, input, 1, true);
   }
   int padding = empty ? after_marker_column - initial_column + 1 : parser->column - initial_column;
+  /* micromark includes the immediately preceding definition linePrefix in
+   * the new container's size, even when it belongs to an outer description. */
+  if (list->parent && list->parent->type == AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION)
+    padding += parser->definition_prefix_size;
   if (previous_description) {
     previous_description->end_line = parser->line_number;
     previous_description->end_column = empty ? after_marker_offset : parser->offset;
+    aimarkdown_cmark_list_spread_boundary(parser, previous_description);
   }
   aimarkdown_cmark_node *description = make_block(parser->mem, AIMARKDOWN_CMARK_NODE_DEFINITION_DESCRIPTION,
                                         parser->line_number, parser->offset + 1);
   if (empty) {
     description->start_column = after_marker_offset + 1;
     if (parser->definition_synthetic_ending && after_marker_offset == input->len - 1) {
-      description->start_line = list->start_line;
-      description->start_column = list->start_column;
+      description->start_line = list->definition.flow_line;
+      description->start_column = list->definition.flow_column;
     }
   }
   description->definition.padding = padding;
@@ -2200,6 +2290,8 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
   parser->blank = false;
   parser->partially_consumed_tab = false;
   parser->definition_lazy_code = false;
+  parser->definition_prefix_size = 0;
+  parser->definition_marker_interrupt = false;
 
   input.data = parser->curline.ptr;
   input.len = parser->curline.size;
@@ -2223,7 +2315,6 @@ static void S_process_line(aimarkdown_cmark_parser *parser, const unsigned char 
   parser->definition_line_offset = parser->offset;
   if (S_open_definition(parser, &input, &last_matched_container)) {
     all_matched = true;
-    aimarkdown_cmark_list_spread_unsupported(parser);
   }
   parser->definition_line_offset = parser->offset;
   container = last_matched_container;

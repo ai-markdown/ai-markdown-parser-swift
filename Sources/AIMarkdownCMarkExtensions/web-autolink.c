@@ -178,6 +178,15 @@ static aimarkdown_cmark_node *match(aimarkdown_cmark_syntax_extension *extension
   text->as.literal = aimarkdown_cmark_chunk_dup(input,start,end-start);
   (void)aimarkdown_cmark_chunk_to_cstr(parser->mem,&text->as.literal);
   aimarkdown_cmark_node_append_child(node,text);
+  /* Preserve the matched token span before inline-subject coordinates are
+   * mapped through each physical content line, including container prefixes.
+   * A leading underscore belongs to Web attention; its later transformed link
+   * is intentionally not presented as a positioned Web literal token. */
+  if ((parser->options & AIMARKDOWN_CMARK_OPT_WEB_POSITIONS) && character != '_') {
+    node->web_subject_start = text->web_subject_start = start;
+    node->web_subject_end = text->web_subject_end = end;
+    node->web_position_flags = text->web_position_flags = AIMARKDOWN_CMARK_WEB_POSITION_SUBJECT;
+  }
   node->start_line = text->start_line = node->end_line = text->end_line = aimarkdown_cmark_inline_parser_get_line(inline_parser);
   node->start_column = text->start_column = column;
   node->end_column = text->end_column = column + end - start - 1;
@@ -189,7 +198,7 @@ aimarkdown_cmark_syntax_extension *aimarkdown_create_web_autolink_extension(void
   aimarkdown_cmark_syntax_extension_set_match_inline_func(extension,match);
   aimarkdown_cmark_llist *characters = NULL;
   aimarkdown_cmark_mem *mem = aimarkdown_cmark_get_default_mem_allocator();
-  for (int c = 0; c < 128; c++) if (alnum(c) || c == '+') characters = aimarkdown_cmark_llist_append(mem,characters,(void *)(intptr_t)c);
+  for (int c = 0; c < 128; c++) if (alnum(c) || c == '+' || c == '-' || c == '.') characters = aimarkdown_cmark_llist_append(mem,characters,(void *)(intptr_t)c);
   aimarkdown_cmark_syntax_extension_set_special_inline_chars(extension,characters);
   return extension;
 }
